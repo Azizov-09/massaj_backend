@@ -1,0 +1,13 @@
+import { Processor, WorkerHost } from '@nestjs/bullmq';
+import { Job } from 'bullmq';
+import { NotificationDeliveryStatus, OutboxStatus } from '@prisma/client';
+import { PrismaService } from '../../database/prisma.service';
+import { HttpSmsProvider } from '../sms/http-sms.provider';
+import { OutboxJob } from './outbox.service';
+@Processor('outbox')
+export class OutboxProcessor extends WorkerHost {
+  constructor(private readonly prisma: PrismaService, private readonly sms: HttpSmsProvider) { super(); }
+  async process(job: Job<OutboxJob>): Promise<void> { const event = await this.prisma.outboxEvent.findUnique({ where: { id: job.data.eventId } }); if (!event || event.status === OutboxStatus.PROCESSED) return; try { if (event.eventType === 'SEND_SMS_NOTIFICATION') await this.sendSms(event.payload); await this.prisma.outboxEvent.update({ where: { id: event.id }, data: { status: OutboxStatus.PROCESSED, processedAt: new Date(), lastError: null } }); } catch (error) { const message = error instanceof Error ? error.message : 'Outbox processing failed'; await this.prisma.outboxEvent.update({ where: { id: event.id }, data: { status: job.attemptsMade >= 2 ? OutboxStatus.FAILED : OutboxStatus.PENDING, availableAt: new Date(Date.now() + 60_000), lastError: message } }); throw error; } }
+  private async sendSms(payload: unknown): Promise<void> { if (!this.hasNotificationId(payload)) throw new Error('Malformed SMS outbox payload'); const delivery = await this.prisma.notificationDelivery.findFirst({ where: { notificationId: payload.notificationId, status: NotificationDeliveryStatus.PENDING }, include: { notification: { include: { user: { select: { phone: true } } } } } }); if (!delivery) return; await this.prisma.notificationDelivery.update({ where: { id: delivery.id }, data: { status: NotificationDeliveryStatus.PROCESSING, attemptCount: { increment: 1 }, lastAttemptAt: new Date() } }); try { const result = await this.sms.send({ phone: delivery.notification.user.phone, message: delivery.notification.message }); await this.prisma.notificationDelivery.update({ where: { id: delivery.id }, data: { status: NotificationDeliveryStatus.SENT, sentAt: new Date(), providerMessageId: result.providerMessageId } }); } catch (error) { await this.prisma.notificationDelivery.update({ where: { id: delivery.id }, data: { status: NotificationDeliveryStatus.FAILED, failedAt: new Date(), failureReason: error instanceof Error ? error.message : 'SMS delivery failed' } }); throw error; } }
+  private hasNotificationId(payload: unknown): payload is { notificationId: string } { return typeof payload === 'object' && payload !== null && 'notificationId' in payload && typeof payload.notificationId === 'string'; }
+}
