@@ -104,7 +104,7 @@ describe('Rehabilitation Center CRM (Comprehensive E2E Tests)', () => {
     const passwordHash = await argon2.hash(testPassword, { type: argon2.argon2id });
 
     // 1. Super Admin
-    const superAdmin = await prisma.user.create({
+    await prisma.user.create({
       data: {
         fullName: 'Super Admin E2E',
         phone: '+998900000001',
@@ -272,7 +272,8 @@ describe('Rehabilitation Center CRM (Comprehensive E2E Tests)', () => {
         .send({ phone: '+998900000002', password: testPassword })
         .expect(200);
 
-      const cookieHeader = loginRes.headers['set-cookie']![0];
+      const setCookie = loginRes.headers['set-cookie'] as string[] | undefined;
+      const cookieHeader = (setCookie ?? [])[0] ?? '';
       const match = cookieHeader.match(/refresh_token=([^;]+)/);
       const rawRefreshToken = match ? match[1] : '';
 

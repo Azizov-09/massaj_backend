@@ -1,4 +1,4 @@
-import { BadRequestException, ConflictException, ForbiddenException, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException } from '@nestjs/common';
 import { AppointmentStatus, Role, ServiceStatus, SpecialistStatus } from '@prisma/client';
 import { AppointmentsService } from './appointments.service';
 import { PrismaService } from '../../database/prisma.service';
@@ -93,7 +93,7 @@ describe('AppointmentsService Unit Tests', () => {
       // updateMany returns 0 when current status not in allowed list
       mockPrisma.appointment.updateMany.mockResolvedValue({ count: 0 });
 
-      const adminUser: RequestUser = { id: 'admin-id', role: Role.ADMIN, phone: '+998901111111' };
+      const adminUser: RequestUser = { id: 'admin-id', role: Role.ADMIN, tokenVersion: 0 };
       await expect(service.cancel('appt-1', adminUser)).rejects.toThrow(BadRequestException);
     });
 
@@ -110,7 +110,7 @@ describe('AppointmentsService Unit Tests', () => {
         status: AppointmentStatus.CANCELLED,
       });
 
-      const parentUser: RequestUser = { id: 'parent-user', role: Role.PARENT, phone: '+998901111111' };
+      const parentUser: RequestUser = { id: 'parent-user', role: Role.PARENT, tokenVersion: 0 };
       const result = await service.cancel('appt-1', parentUser);
       expect(result.status).toBe(AppointmentStatus.CANCELLED);
     });
@@ -128,7 +128,7 @@ describe('AppointmentsService Unit Tests', () => {
         status: AppointmentStatus.NO_SHOW,
       });
 
-      const specUser: RequestUser = { id: 'spec-user', role: Role.SPECIALIST, phone: '+998902222222' };
+      const specUser: RequestUser = { id: 'spec-user', role: Role.SPECIALIST, tokenVersion: 0 };
       const result = await service.noShow('appt-1', specUser);
       expect(result.status).toBe(AppointmentStatus.NO_SHOW);
     });
@@ -141,7 +141,7 @@ describe('AppointmentsService Unit Tests', () => {
         specialist: { userId: 'spec-user' },
       });
 
-      const parentUser: RequestUser = { id: 'parent-user', role: Role.PARENT, phone: '+998901111111' };
+      const parentUser: RequestUser = { id: 'parent-user', role: Role.PARENT, tokenVersion: 0 };
       await expect(service.noShow('appt-1', parentUser)).rejects.toThrow(ForbiddenException);
     });
   });
@@ -240,7 +240,7 @@ describe('AppointmentsService Unit Tests', () => {
         status: 'IN_PROGRESS',
       });
 
-      const specUser: RequestUser = { id: 'spec-user', role: Role.SPECIALIST, phone: '+998902222222' };
+      const specUser: RequestUser = { id: 'spec-user', role: Role.SPECIALIST, tokenVersion: 0 };
       const res = await service.start('appt-1', specUser);
 
       expect(res.session.servicePriceSnapshot).toBe(150_000);

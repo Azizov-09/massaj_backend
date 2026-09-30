@@ -1,4 +1,4 @@
-import { BadRequestException, ConflictException } from '@nestjs/common';
+import { BadRequestException } from '@nestjs/common';
 import { PaymentMethod, TransactionDirection, TransactionType } from '@prisma/client';
 import { FinanceService } from './finance.service';
 import { PrismaService } from '../../database/prisma.service';
@@ -11,7 +11,7 @@ describe('FinanceService Unit Tests', () => {
 
   beforeEach(() => {
     mockPrisma = {
-      $transaction: jest.fn(async (cb, _opts) => {
+      $transaction: jest.fn(async (cb: any) => {
         if (typeof cb === 'function') {
           return cb(mockPrisma);
         }
@@ -143,7 +143,7 @@ describe('FinanceService Unit Tests', () => {
 
       // Requesting 30k refund (80k + 30k = 110k > 100k)
       await expect(
-        service.refund('pay-1', { amount: 30_000, reason: 'Too much' }, 'admin-id'),
+        service.refund('pay-1', { amount: 30_000, note: 'Too much' }, 'admin-id'),
       ).rejects.toThrow(BadRequestException);
     });
 
@@ -167,7 +167,7 @@ describe('FinanceService Unit Tests', () => {
       };
       mockPrisma.transaction.create.mockResolvedValue(refundTx);
 
-      const res = await service.refund('pay-1', { amount: 50_000, reason: 'Partial refund' }, 'admin-id');
+      const res = await service.refund('pay-1', { amount: 50_000, note: 'Partial refund' }, 'admin-id');
       expect(res).toEqual(refundTx);
       expect(mockPrisma.transaction.create).toHaveBeenCalledWith({
         data: expect.objectContaining({

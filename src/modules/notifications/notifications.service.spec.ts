@@ -1,4 +1,4 @@
-import { NotificationChannel, NotificationDeliveryStatus, NotificationPriority, NotificationType } from '@prisma/client';
+import { NotificationChannel, NotificationType } from '@prisma/client';
 import { NotificationsService } from './notifications.service';
 import { PrismaService } from '../../database/prisma.service';
 import { ConfigService } from '@nestjs/config';
