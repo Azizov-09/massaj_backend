@@ -1,4 +1,48 @@
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { AnnouncementAudience } from '@prisma/client';
 import { IsArray, IsBoolean, IsDateString, IsEnum, IsOptional, IsString, IsUUID, Length } from 'class-validator';
-export class CreateAnnouncementDto { @IsString() @Length(1, 200) title!: string; @IsString() @Length(1, 5000) message!: string; @IsEnum(AnnouncementAudience) audience!: AnnouncementAudience; @IsOptional() @IsArray() @IsUUID('4', { each: true }) recipientUserIds?: string[]; @IsOptional() @IsBoolean() sendInApp?: boolean; @IsOptional() @IsBoolean() sendSms?: boolean; @IsOptional() @IsDateString() scheduledAt?: string; }
-export class PublishAnnouncementDto { @IsOptional() @IsArray() @IsUUID('4', { each: true }) recipientUserIds?: string[]; }
+
+export class CreateAnnouncementDto {
+  @ApiProperty({ description: 'Announcement title', example: 'Center Holiday Schedule Notice' })
+  @IsString()
+  @Length(1, 200)
+  title!: string;
+
+  @ApiProperty({ description: 'Full announcement body / notice text' })
+  @IsString()
+  @Length(1, 5000)
+  message!: string;
+
+  @ApiProperty({ enum: AnnouncementAudience, description: 'Target audience', example: AnnouncementAudience.ALL_PARENTS })
+  @IsEnum(AnnouncementAudience)
+  audience!: AnnouncementAudience;
+
+  @ApiPropertyOptional({ description: 'Specific target user UUIDs if custom audience', type: [String] })
+  @IsOptional()
+  @IsArray()
+  @IsUUID('4', { each: true })
+  recipientUserIds?: string[];
+
+  @ApiPropertyOptional({ description: 'Send in-app notification', default: true })
+  @IsOptional()
+  @IsBoolean()
+  sendInApp?: boolean;
+
+  @ApiPropertyOptional({ description: 'Send broadcast SMS', default: false })
+  @IsOptional()
+  @IsBoolean()
+  sendSms?: boolean;
+
+  @ApiPropertyOptional({ description: 'Scheduled publication date-time (ISO 8601)' })
+  @IsOptional()
+  @IsDateString()
+  scheduledAt?: string;
+}
+
+export class PublishAnnouncementDto {
+  @ApiPropertyOptional({ description: 'Optional list of user UUIDs to deliver publication to', type: [String] })
+  @IsOptional()
+  @IsArray()
+  @IsUUID('4', { each: true })
+  recipientUserIds?: string[];
+}
