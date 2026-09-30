@@ -83,8 +83,8 @@ export class PlatformController {
   @Roles(Role.SUPER_ADMIN, Role.ADMIN)
   @Get('activity-logs')
   @ApiOperation({ summary: 'Query Audit / Activity Logs' })
-  @ApiQuery({ name: 'page', required: false, example: 1 })
-  @ApiQuery({ name: 'limit', required: false, example: 20 })
+  @ApiQuery({ name: 'page', required: false })
+  @ApiQuery({ name: 'limit', required: false })
   @ApiResponse({ status: 200, description: 'Paginated audit trail.' })
   logs(@Query('page') page = 1, @Query('limit') limit = 20) {
     return this.platform.activityLogs(Number(page), Math.min(100, Number(limit)));

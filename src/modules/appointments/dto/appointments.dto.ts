@@ -4,31 +4,31 @@ import { Type } from 'class-transformer';
 import { IsDateString, IsEnum, IsOptional, IsString, IsUUID, Length, Max, Min } from 'class-validator';
 
 export class CreateAppointmentDto {
-  @ApiProperty({ description: 'Target child UUID', example: '11111111-1111-1111-1111-111111111111' })
+  @ApiProperty({ description: 'Target child UUID' })
   @IsUUID()
   childId!: string;
 
-  @ApiProperty({ description: 'Parent UUID responsible for booking', example: '22222222-2222-2222-2222-222222222222' })
+  @ApiProperty({ description: 'Parent UUID responsible for booking' })
   @IsUUID()
   parentId!: string;
 
-  @ApiProperty({ description: 'Specialist UUID assigned to appointment', example: '33333333-3333-3333-3333-333333333333' })
+  @ApiProperty({ description: 'Specialist UUID assigned to appointment' })
   @IsUUID()
   specialistId!: string;
 
-  @ApiProperty({ description: 'Service catalog item UUID', example: '44444444-4444-4444-4444-444444444444' })
+  @ApiProperty({ description: 'Service catalog item UUID' })
   @IsUUID()
   serviceId!: string;
 
-  @ApiProperty({ description: 'ISO 8601 start date-time', example: '2026-10-01T10:00:00Z' })
+  @ApiProperty({ description: 'ISO 8601 start date-time' })
   @IsDateString()
   startAt!: string;
 
-  @ApiProperty({ description: 'ISO 8601 end date-time', example: '2026-10-01T11:00:00Z' })
+  @ApiProperty({ description: 'ISO 8601 end date-time' })
   @IsDateString()
   endAt!: string;
 
-  @ApiPropertyOptional({ description: 'Optional appointment notes or special instructions', example: 'Focus on lower back massage' })
+  @ApiPropertyOptional({ description: 'Optional appointment notes or special instructions' })
   @IsOptional()
   @IsString()
   @Length(1, 2000)
@@ -36,22 +36,22 @@ export class CreateAppointmentDto {
 }
 
 export class UpdateAppointmentDto {
-  @ApiPropertyOptional({ description: 'New specialist UUID', example: '33333333-3333-3333-3333-333333333333' })
+  @ApiPropertyOptional({ description: 'New specialist UUID' })
   @IsOptional()
   @IsUUID()
   specialistId?: string;
 
-  @ApiPropertyOptional({ description: 'New service UUID', example: '44444444-4444-4444-4444-444444444444' })
+  @ApiPropertyOptional({ description: 'New service UUID' })
   @IsOptional()
   @IsUUID()
   serviceId?: string;
 
-  @ApiPropertyOptional({ description: 'Rescheduled start date-time', example: '2026-10-02T10:00:00Z' })
+  @ApiPropertyOptional({ description: 'Rescheduled start date-time' })
   @IsOptional()
   @IsDateString()
   startAt?: string;
 
-  @ApiPropertyOptional({ description: 'Rescheduled end date-time', example: '2026-10-02T11:00:00Z' })
+  @ApiPropertyOptional({ description: 'Rescheduled end date-time' })
   @IsOptional()
   @IsDateString()
   endAt?: string;

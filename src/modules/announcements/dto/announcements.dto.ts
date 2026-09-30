@@ -3,7 +3,7 @@ import { AnnouncementAudience } from '@prisma/client';
 import { IsArray, IsBoolean, IsDateString, IsEnum, IsOptional, IsString, IsUUID, Length } from 'class-validator';
 
 export class CreateAnnouncementDto {
-  @ApiProperty({ description: 'Announcement title', example: 'Center Holiday Schedule Notice' })
+  @ApiProperty({ description: 'Announcement title' })
   @IsString()
   @Length(1, 200)
   title!: string;
@@ -13,7 +13,7 @@ export class CreateAnnouncementDto {
   @Length(1, 5000)
   message!: string;
 
-  @ApiProperty({ enum: AnnouncementAudience, description: 'Target audience', example: AnnouncementAudience.ALL_PARENTS })
+  @ApiProperty({ enum: AnnouncementAudience, description: 'Target audience' })
   @IsEnum(AnnouncementAudience)
   audience!: AnnouncementAudience;
 

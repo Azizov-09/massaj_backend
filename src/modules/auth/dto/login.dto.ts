@@ -4,7 +4,6 @@ import { IsString, Length, Matches } from 'class-validator';
 export class LoginDto {
   @ApiProperty({
     description: 'International E.164 phone number',
-    example: '+998901234567',
   })
   @IsString()
   @Length(7, 32)
@@ -12,7 +11,6 @@ export class LoginDto {
 
   @ApiProperty({
     description: 'Account password',
-    example: 'Password123!',
     format: 'password',
   })
   @IsString()
@@ -23,7 +21,6 @@ export class LoginDto {
 export class RefreshDto {
   @ApiProperty({
     description: 'Cryptographic refresh token string',
-    example: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...',
   })
   @IsString()
   @Length(20, 4096)
@@ -33,7 +30,6 @@ export class RefreshDto {
 export class ChangePasswordDto {
   @ApiProperty({
     description: 'Current password for verification',
-    example: 'OldPassword123!',
     format: 'password',
   })
   @IsString()
@@ -42,7 +38,6 @@ export class ChangePasswordDto {
 
   @ApiProperty({
     description: 'New password (min 12 chars, must contain uppercase, lowercase, and digit)',
-    example: 'NewSecurePassword123!',
     format: 'password',
   })
   @IsString()

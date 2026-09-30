@@ -2,19 +2,18 @@ import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { IsInt, IsOptional, IsString, Length, Matches, Max, Min } from 'class-validator';
 
 export class CreateUserProfileDto {
-  @ApiProperty({ description: 'User full name', example: 'Malika Karimova' })
+  @ApiProperty({ description: 'User full name' })
   @IsString()
   @Length(2, 160)
   fullName!: string;
 
-  @ApiProperty({ description: 'International phone number', example: '+998901234567' })
+  @ApiProperty({ description: 'International phone number' })
   @IsString()
   @Length(7, 32)
   phone!: string;
 
   @ApiProperty({
     description: 'Initial password (min 12 chars, must contain uppercase, lowercase, and number)',
-    example: 'SecurePass123!',
     format: 'password',
   })
   @IsString()
@@ -26,7 +25,7 @@ export class CreateUserProfileDto {
 }
 
 export class CreateParentDto extends CreateUserProfileDto {
-  @ApiPropertyOptional({ description: 'Residential address', example: 'Tashkent, Mirzo Ulugbek 12' })
+  @ApiPropertyOptional({ description: 'Residential address' })
   @IsOptional()
   @IsString()
   @Length(1, 500)
@@ -34,7 +33,7 @@ export class CreateParentDto extends CreateUserProfileDto {
 }
 
 export class UpdateParentDto {
-  @ApiPropertyOptional({ description: 'Updated full name', example: 'Malika Karimova' })
+  @ApiPropertyOptional({ description: 'Updated full name' })
   @IsOptional()
   @IsString()
   @Length(2, 160)
@@ -48,12 +47,12 @@ export class UpdateParentDto {
 }
 
 export class CreateSpecialistDto extends CreateUserProfileDto {
-  @ApiProperty({ description: 'Clinical specialization', example: 'Pediatric Massage Therapist & Physical Rehab' })
+  @ApiProperty({ description: 'Clinical specialization' })
   @IsString()
   @Length(2, 250)
   specialization!: string;
 
-  @ApiProperty({ description: 'Years of clinical rehabilitation experience', example: 7 })
+  @ApiProperty({ description: 'Years of clinical rehabilitation experience' })
   @IsInt()
   @Min(0)
   @Max(80)

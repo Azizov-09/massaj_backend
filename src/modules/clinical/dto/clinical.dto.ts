@@ -8,7 +8,7 @@ export class CreateAttendanceDto {
   @IsUUID()
   appointmentId!: string;
 
-  @ApiProperty({ enum: AttendanceStatus, description: 'Attendance outcome', example: AttendanceStatus.PRESENT })
+  @ApiProperty({ enum: AttendanceStatus, description: 'Attendance outcome' })
   @IsEnum(AttendanceStatus)
   status!: AttendanceStatus;
 
@@ -125,7 +125,7 @@ export class CreateProgressDto {
   @IsUUID()
   specialistId?: string;
 
-  @ApiProperty({ description: 'Progress milestone title', example: 'Independent Sitting Milestone' })
+  @ApiProperty({ description: 'Progress milestone title' })
   @IsString()
   @Length(1, 200)
   title!: string;
@@ -160,7 +160,7 @@ export class CreateGoalDto {
   @IsUUID()
   specialistId?: string;
 
-  @ApiProperty({ description: 'Therapeutic goal title', example: 'Improve neck muscle control' })
+  @ApiProperty({ description: 'Therapeutic goal title' })
   @IsString()
   @Length(1, 200)
   title!: string;
@@ -171,12 +171,12 @@ export class CreateGoalDto {
   @Max(5000)
   description?: string;
 
-  @ApiPropertyOptional({ description: 'Target completion date (YYYY-MM-DD)', example: '2026-12-31' })
+  @ApiPropertyOptional({ description: 'Target completion date (YYYY-MM-DD)' })
   @IsOptional()
   @IsDateString()
   targetDate?: string;
 
-  @ApiPropertyOptional({ description: 'Percentage completed (0-100)', example: 25, default: 0 })
+  @ApiPropertyOptional({ description: 'Percentage completed (0-100)', default: 0 })
   @IsOptional()
   @Type(() => Number)
   @IsInt()

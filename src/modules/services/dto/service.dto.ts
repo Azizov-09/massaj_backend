@@ -4,7 +4,7 @@ import { Type } from 'class-transformer';
 import { IsEnum, IsInt, IsOptional, IsString, Length, Max, Min } from 'class-validator';
 
 export class CreateServiceDto {
-  @ApiProperty({ description: 'Service catalog item name', example: 'Therapeutic Pediatric Massage (60 min)' })
+  @ApiProperty({ description: 'Service catalog item name' })
   @IsString()
   @Length(2, 160)
   name!: string;
@@ -15,14 +15,14 @@ export class CreateServiceDto {
   @Length(1, 5000)
   description?: string;
 
-  @ApiProperty({ description: 'Duration in minutes', example: 60 })
+  @ApiProperty({ description: 'Duration in minutes' })
   @Type(() => Number)
   @IsInt()
   @Min(1)
   @Max(480)
   durationMinutes!: number;
 
-  @ApiProperty({ description: 'Price in smallest currency unit (e.g. tiyin)', example: 15000000 })
+  @ApiProperty({ description: 'Price in smallest currency unit (e.g. tiyin)' })
   @Type(() => Number)
   @IsInt()
   @Min(0)

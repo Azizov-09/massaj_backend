@@ -4,25 +4,25 @@ import { Type } from 'class-transformer';
 import { IsBoolean, IsDateString, IsEnum, IsOptional, IsString, Length, Max, Min } from 'class-validator';
 
 export class CreateChildDto {
-  @ApiProperty({ description: 'Child first name', example: 'Aziz' })
+  @ApiProperty({ description: 'Child first name' })
   @IsString()
   @Length(1, 100)
   firstName!: string;
 
-  @ApiProperty({ description: 'Child last name', example: 'Karimov' })
+  @ApiProperty({ description: 'Child last name' })
   @IsString()
   @Length(1, 100)
   lastName!: string;
 
-  @ApiProperty({ description: 'Child birth date (YYYY-MM-DD)', example: '2020-05-15' })
+  @ApiProperty({ description: 'Child birth date (YYYY-MM-DD)' })
   @IsDateString()
   birthDate!: string;
 
-  @ApiProperty({ enum: Gender, description: 'Child biological gender', example: Gender.MALE })
+  @ApiProperty({ enum: Gender, description: 'Child biological gender' })
   @IsEnum(Gender)
   gender!: Gender;
 
-  @ApiPropertyOptional({ description: 'Residential address', example: 'Tashkent, Chilanzar 7' })
+  @ApiPropertyOptional({ description: 'Residential address' })
   @IsOptional()
   @IsString()
   @Length(1, 500)
@@ -36,19 +36,19 @@ export class CreateChildDto {
 }
 
 export class UpdateChildDto {
-  @ApiPropertyOptional({ description: 'Child first name', example: 'Aziz' })
+  @ApiPropertyOptional({ description: 'Child first name' })
   @IsOptional()
   @IsString()
   @Length(1, 100)
   firstName?: string;
 
-  @ApiPropertyOptional({ description: 'Child last name', example: 'Karimov' })
+  @ApiPropertyOptional({ description: 'Child last name' })
   @IsOptional()
   @IsString()
   @Length(1, 100)
   lastName?: string;
 
-  @ApiPropertyOptional({ description: 'Child birth date (YYYY-MM-DD)', example: '2020-05-15' })
+  @ApiPropertyOptional({ description: 'Child birth date (YYYY-MM-DD)' })
   @IsOptional()
   @IsDateString()
   birthDate?: string;
@@ -72,7 +72,7 @@ export class UpdateChildDto {
 }
 
 export class LinkParentDto {
-  @ApiProperty({ description: 'Relationship type (e.g., MOTHER, FATHER, GUARDIAN)', example: 'MOTHER' })
+  @ApiProperty({ description: 'Relationship type (e.g., MOTHER, FATHER, GUARDIAN)' })
   @IsString()
   @Length(2, 80)
   relationship!: string;

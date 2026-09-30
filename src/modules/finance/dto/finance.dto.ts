@@ -12,18 +12,18 @@ export class RecordPaymentDto {
   @IsUUID()
   childId!: string;
 
-  @ApiProperty({ description: 'Payment amount in smallest currency unit (e.g. tiyin)', example: 15000000 })
+  @ApiProperty({ description: 'Payment amount in smallest currency unit (e.g. tiyin)' })
   @Type(() => Number)
   @IsInt()
   @Min(1)
   @Max(2_000_000_000)
   amount!: number;
 
-  @ApiProperty({ enum: PaymentMethod, description: 'Method of payment', example: PaymentMethod.CASH })
+  @ApiProperty({ enum: PaymentMethod, description: 'Method of payment' })
   @IsEnum(PaymentMethod)
   method!: PaymentMethod;
 
-  @ApiPropertyOptional({ description: 'Payment note or transaction memo', example: 'Deposit for 10 massage sessions' })
+  @ApiPropertyOptional({ description: 'Payment note or transaction memo' })
   @IsOptional()
   @IsString()
   @Length(1, 1000)
@@ -42,7 +42,7 @@ export class RecordPaymentDto {
 }
 
 export class RefundDto {
-  @ApiProperty({ description: 'Refund amount in smallest currency unit', example: 5000000 })
+  @ApiProperty({ description: 'Refund amount in smallest currency unit' })
   @Type(() => Number)
   @IsInt()
   @Min(1)
