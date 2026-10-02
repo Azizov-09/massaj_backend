@@ -15,8 +15,8 @@ export const environmentSchema = Joi.object({
   THROTTLE_TTL: Joi.number().integer().min(1000).default(60000),
   THROTTLE_LIMIT: Joi.number().integer().min(1).default(100),
   SMS_ENABLED: Joi.boolean().truthy('true').falsy('false').default(false),
-  SMS_PROVIDER: Joi.string().when('SMS_ENABLED', { is: true, then: Joi.required(), otherwise: Joi.optional() }),
-  SMS_API_URL: Joi.string().uri().when('SMS_ENABLED', { is: true, then: Joi.required(), otherwise: Joi.optional() }),
-  SMS_API_KEY: Joi.string().when('SMS_ENABLED', { is: true, then: Joi.required(), otherwise: Joi.optional() }),
-  SMS_SENDER: Joi.string().when('SMS_ENABLED', { is: true, then: Joi.required(), otherwise: Joi.optional() }),
+  SMS_PROVIDER: Joi.string().allow('').when('SMS_ENABLED', { is: true, then: Joi.required(), otherwise: Joi.optional() }),
+  SMS_API_URL: Joi.string().allow('').when('SMS_ENABLED', { is: true, then: Joi.string().uri().required(), otherwise: Joi.optional() }),
+  SMS_API_KEY: Joi.string().allow('').when('SMS_ENABLED', { is: true, then: Joi.required(), otherwise: Joi.optional() }),
+  SMS_SENDER: Joi.string().allow('').when('SMS_ENABLED', { is: true, then: Joi.required(), otherwise: Joi.optional() }),
 }).unknown(true);
