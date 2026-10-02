@@ -19,4 +19,4 @@ export const environmentSchema = Joi.object({
   SMS_API_URL: Joi.string().uri().when('SMS_ENABLED', { is: true, then: Joi.required(), otherwise: Joi.optional() }),
   SMS_API_KEY: Joi.string().when('SMS_ENABLED', { is: true, then: Joi.required(), otherwise: Joi.optional() }),
   SMS_SENDER: Joi.string().when('SMS_ENABLED', { is: true, then: Joi.required(), otherwise: Joi.optional() }),
-}).unknown(false);
+}).unknown(true);

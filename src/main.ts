@@ -104,7 +104,7 @@ async function bootstrap(): Promise<void> {
   prisma.enableShutdownHooks(app);
 
   const port = Number(process.env.PORT ?? 3000);
-  await app.listen(port);
+  await app.listen(port, '0.0.0.0');
   logger.log(`Server listening on port ${port}`);
   logger.log(`Swagger documentation available at http://localhost:${port}/api/docs`);
 }
