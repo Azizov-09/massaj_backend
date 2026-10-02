@@ -5,9 +5,9 @@
   "description": "Secure CRM backend for a children's massage and rehabilitation center.",
   "scripts": {
     "build": "nest build",
-    "start": "node dist/main",
+    "start": "prisma migrate deploy && node dist/main",
     "start:dev": "nest start --watch",
-    "start:prod": "node dist/main",
+    "start:prod": "prisma migrate deploy && node dist/main",
     "postinstall": "prisma generate",
     "lint": "eslint \"{src,test}/**/*.ts\" --max-warnings=0",
     "typecheck": "tsc --noEmit",
