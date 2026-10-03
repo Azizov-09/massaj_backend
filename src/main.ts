@@ -73,6 +73,8 @@ async function bootstrap(): Promise<void> {
       description: 'HttpOnly cryptographic refresh cookie',
     })
     .addTag('Authentication', 'Login, token refresh, multi-device logout, and password change')
+    .addTag('Admins', 'Administrator account management — create, list, update, archive (SUPER_ADMIN only)')
+    .addTag('Employees', 'Non-medical staff management — receptionist, nurse, accountant, etc.')
     .addTag('Profiles', 'Admin, Specialist, and Parent account profile operations')
     .addTag('Children', 'Child records, intake profiles, and parental custody delegation')
     .addTag('Appointments', 'Booking calendar, slot conflict detection, and lifecycle management')

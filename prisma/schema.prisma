@@ -32,6 +32,11 @@ enum SpecialistStatus {
   INACTIVE
   ARCHIVED
 }
+enum EmployeeStatus {
+  ACTIVE
+  INACTIVE
+  ARCHIVED
+}
 enum ServiceStatus { 
   ACTIVE
   ARCHIVED
@@ -130,6 +135,7 @@ model User {
   id               String     @id @default(uuid()) @db.Uuid
   fullName         String     @db.VarChar(160)
   phone            String     @unique @db.VarChar(32)
+  email            String?    @db.VarChar(255)
   passwordHash     String
   role             Role
   status           UserStatus @default(ACTIVE)
@@ -151,6 +157,7 @@ model User {
   activityLogs     ActivityLog[]
   @@index([role])
   @@index([status])
+  @@index([email])
 }
 
 model Admin {
@@ -602,4 +609,22 @@ model OutboxEvent {
   @@index([aggregateType])
   @@index([aggregateId])
   @@index([createdAt])
+}
+
+model Employee {
+  id        String         @id @default(uuid()) @db.Uuid
+  fullName  String         @db.VarChar(160)
+  position  String         @db.VarChar(100)
+  phone     String         @db.VarChar(32)
+  email     String?        @db.VarChar(255)
+  joinedAt  DateTime       @default(now())
+  status    EmployeeStatus @default(ACTIVE)
+  notes     String?        @db.VarChar(1000)
+  salary    Decimal?       @db.Decimal(12, 2)
+  createdAt DateTime       @default(now())
+  updatedAt DateTime       @updatedAt
+
+  @@index([position])
+  @@index([status])
+  @@index([phone])
 }

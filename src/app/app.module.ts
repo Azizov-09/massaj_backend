@@ -25,6 +25,8 @@ import { PlatformModule } from '../modules/platform/platform.module';
 import { PortalsModule } from '../modules/portals/portals.module';
 import { AnalyticsModule } from '../modules/analytics/analytics.module';
 import { ReportsModule } from '../modules/reports/reports.module';
+import { AdminsModule } from '../modules/admins/admins.module';
+import { EmployeesModule } from '../modules/employees/employees.module';
 
 @Module({
   imports: [
@@ -53,6 +55,8 @@ import { ReportsModule } from '../modules/reports/reports.module';
     PortalsModule,
     AnalyticsModule,
     ReportsModule,
+    AdminsModule,
+    EmployeesModule,
   ],
   providers: [
     { provide: APP_GUARD, useClass: JwtAuthGuard },
