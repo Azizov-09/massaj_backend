@@ -6,6 +6,7 @@ import helmet from 'helmet';
 import cookieParser from 'cookie-parser';
 import { AppModule } from './app/app.module';
 import { PrismaService } from './database/prisma.service';
+import { seedDatabase } from './database/seed';
 
 async function bootstrap(): Promise<void> {
   const logger = new Logger('Bootstrap');
@@ -104,6 +105,18 @@ async function bootstrap(): Promise<void> {
 
   const prisma = app.get(PrismaService);
   prisma.enableShutdownHooks(app);
+
+  // Auto-seed mock data on startup if AUTO_SEED=true or if database has no users
+  const autoSeed = process.env.AUTO_SEED === 'true';
+  try {
+    const userCount = await prisma.user.count();
+    if (autoSeed || userCount === 0) {
+      logger.log(`[AutoSeed] Checking/seeding database (autoSeed=${autoSeed}, currentUsers=${userCount})...`);
+      await seedDatabase(prisma, autoSeed);
+    }
+  } catch (err) {
+    logger.error('[AutoSeed] Error during initial database seed check:', err);
+  }
 
   const port = Number(process.env.PORT ?? 3000);
   await app.listen(port, '0.0.0.0');
