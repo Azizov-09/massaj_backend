@@ -23,6 +23,7 @@ async function bootstrap(): Promise<void> {
           styleSrc: [`'self'`, `'unsafe-inline'`],
           imgSrc: [`'self'`, 'data:', 'validator.swagger.io'],
           scriptSrc: [`'self'`, `'unsafe-inline'`, `'unsafe-eval'`],
+          upgradeInsecureRequests: null,
         },
       },
       crossOriginEmbedderPolicy: false,
