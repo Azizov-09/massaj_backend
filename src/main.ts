@@ -32,12 +32,23 @@ async function bootstrap(): Promise<void> {
 
   app.use(cookieParser());
 
-  // CORS Policy
+  // Cross-Origin Resource Sharing (CORS) Policy
+  const allowedOrigins: (string | RegExp)[] = [
+    'https://massaj-frontent.vercel.app',
+    'http://localhost:5173',
+    'http://localhost:3000',
+    /^https:\/\/massaj-frontent.*\.vercel\.app$/,
+  ];
+  if (process.env.FRONTEND_URL && !allowedOrigins.includes(process.env.FRONTEND_URL)) {
+    allowedOrigins.push(process.env.FRONTEND_URL);
+  }
+
   app.enableCors({
-    origin: process.env.FRONTEND_URL ?? 'http://localhost:5173',
+    origin: allowedOrigins,
     credentials: true,
-    methods: ['GET', 'POST', 'PATCH', 'PUT', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
+    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept', 'Origin'],
+    exposedHeaders: ['Set-Cookie'],
   });
 
   // Strict Global Validation Pipe

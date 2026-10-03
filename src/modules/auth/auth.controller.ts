@@ -36,7 +36,11 @@ export class AuthController {
   async login(@Body() dto: LoginDto, @Req() request: Request, @Res({ passthrough: true }) response: Response) {
     const result = await this.auth.login(dto.phone, dto.password, request.headers['user-agent'], request.ip);
     this.setRefreshCookie(response, result.tokens.refreshToken);
-    return { accessToken: result.tokens.accessToken, user: result.user };
+    return {
+      accessToken: result.tokens.accessToken,
+      refreshToken: result.tokens.refreshToken,
+      user: result.user,
+    };
   }
 
   @Public()
@@ -52,7 +56,10 @@ export class AuthController {
   async refresh(@Body() dto: RefreshDto, @Req() request: Request, @Res({ passthrough: true }) response: Response) {
     const tokens = await this.auth.refresh(dto.refreshToken, request.headers['user-agent'], request.ip);
     this.setRefreshCookie(response, tokens.refreshToken);
-    return { accessToken: tokens.accessToken };
+    return {
+      accessToken: tokens.accessToken,
+      refreshToken: tokens.refreshToken,
+    };
   }
 
   @ApiBearerAuth()
