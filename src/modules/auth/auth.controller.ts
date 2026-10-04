@@ -107,10 +107,13 @@ export class AuthController {
   }
 
   private setRefreshCookie(response: Response, refreshToken: string): void {
+    // Cross-origin (vercel.app → VPS): sameSite='none' + secure=true required.
+    // localhost dev: sameSite='lax', secure=false is sufficient.
+    const isSecure = process.env.COOKIE_SECURE === 'true';
     response.cookie('refresh_token', refreshToken, {
       httpOnly: true,
-      sameSite: 'strict',
-      secure: process.env.COOKIE_SECURE === 'true',
+      sameSite: isSecure ? 'none' : 'lax',
+      secure: isSecure,
       maxAge: 30 * 24 * 60 * 60 * 1000,
       path: '/api/v1/auth',
     });

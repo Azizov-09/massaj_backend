@@ -31,8 +31,22 @@ export class ProfilesService {
               },
             },
           },
-          include: {
-            parent: true,
+          select: {
+            id: true,
+            fullName: true,
+            phone: true,
+            email: true,
+            role: true,
+            status: true,
+            createdAt: true,
+            parent: {
+              select: {
+                id: true,
+                address: true,
+                createdAt: true,
+                updatedAt: true,
+              },
+            },
           },
         });
 
@@ -94,8 +108,25 @@ export class ProfilesService {
               },
             },
           },
-          include: {
-            specialist: true,
+          select: {
+            id: true,
+            fullName: true,
+            phone: true,
+            email: true,
+            role: true,
+            status: true,
+            createdAt: true,
+            specialist: {
+              select: {
+                id: true,
+                specialization: true,
+                experienceYears: true,
+                bio: true,
+                status: true,
+                createdAt: true,
+                updatedAt: true,
+              },
+            },
           },
         });
 

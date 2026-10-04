@@ -1,6 +1,6 @@
 import 'reflect-metadata';
-import { Logger, ValidationPipe } from '@nestjs/common';
-import { NestFactory } from '@nestjs/core';
+import { ClassSerializerInterceptor, Logger, ValidationPipe } from '@nestjs/common';
+import { NestFactory, Reflector } from '@nestjs/core';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import helmet from 'helmet';
 import cookieParser from 'cookie-parser';
@@ -60,6 +60,10 @@ async function bootstrap(): Promise<void> {
       transformOptions: { enableImplicitConversion: false },
     }),
   );
+
+  // Global serializer: strips @Exclude() fields (e.g. passwordHash, tokenVersion)
+  // from ALL response entities automatically — critical security layer
+  app.useGlobalInterceptors(new ClassSerializerInterceptor(app.get(Reflector)));
 
   // Complete OpenAPI / Swagger Specification
   const config = new DocumentBuilder()
