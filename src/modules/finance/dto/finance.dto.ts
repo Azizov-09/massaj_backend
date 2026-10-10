@@ -90,3 +90,26 @@ export class FinanceQueryDto {
   @Max(100)
   limit = 50;
 }
+
+export class RecordChargeDto {
+  @ApiProperty({ description: 'Parent UUID responsible for payment' })
+  @IsUUID()
+  parentId!: string;
+
+  @ApiPropertyOptional({ description: 'Child benefiting UUID' })
+  @IsOptional()
+  @IsUUID()
+  childId?: string;
+
+  @ApiProperty({ description: 'Charge amount in UZS' })
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(2_000_000_000)
+  amount!: number;
+
+  @ApiProperty({ description: 'Description of the charged medical/rehab service' })
+  @IsString()
+  @Length(2, 500)
+  description!: string;
+}

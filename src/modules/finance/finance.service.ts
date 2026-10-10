@@ -210,6 +210,84 @@ export class FinanceService {
     }
   }
 
+  async recordCharge(dto: { parentId: string; childId?: string; amount: number; description: string }, actorId: string) {
+    const result = await this.prisma.$transaction(async (tx) => {
+      const parent = await tx.parent.findUnique({
+        where: { id: dto.parentId },
+        include: { user: { select: { id: true, fullName: true } } },
+      });
+      if (!parent) throw new NotFoundException('Parent not found');
+
+      if (dto.childId) {
+        const relation = await tx.childParent.findUnique({
+          where: { childId_parentId: { childId: dto.childId, parentId: dto.parentId } },
+        });
+        if (!relation) throw new BadRequestException('Child is not related to parent');
+      }
+
+      // Record charge transaction
+      const chargeTx = await tx.transaction.create({
+        data: {
+          parentId: dto.parentId,
+          childId: dto.childId,
+          type: TransactionType.SESSION_CHARGE,
+          direction: TransactionDirection.OUT,
+          amount: dto.amount,
+          description: dto.description,
+          idempotencyKey: `charge:${Date.now()}:${Math.random().toString(36).substring(2, 9)}`,
+        },
+      });
+
+      // Calculate net state of parent inside transaction
+      const rows = await tx.transaction.findMany({
+        where: { parentId: dto.parentId },
+        select: { amount: true, direction: true, type: true, parentId: true },
+      });
+      const finState = calculateFinancialState(rows, dto.parentId);
+
+      let notif = null;
+      if (finState.debt > 0) {
+        // Balans tugadi, qarzdorlik yozildi -> DEBT bildirishnomasi
+        notif = await this.notifications.create(
+          {
+            userId: parent.userId,
+            type: NotificationType.DEBT,
+            title: 'Qarzdorlik haqida ogohlantirish',
+            message: `Muolaja narxi hisoblandi (${dto.amount.toLocaleString()} UZS). Balansingizda mablag' tugadi, joriy qarzdorlik: ${finState.debt.toLocaleString()} UZS. Iltimos, hisobingizni to'ldiring.`,
+            relatedEntity: 'Transaction',
+            relatedEntityId: chargeTx.id,
+            dedupeKey: `debt-alert:${chargeTx.id}`,
+            allowSms: false,
+          },
+          tx,
+        );
+      }
+
+      await tx.activityLog.create({
+        data: {
+          userId: actorId,
+          action: 'CHARGE_RECORDED',
+          entity: 'Transaction',
+          entityId: chargeTx.id,
+          description: `Recorded service charge of ${dto.amount} UZS for parent ${parent.user.fullName}`,
+        },
+      });
+
+      return { chargeTx, notif, parentUserId: parent.userId, finState };
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+
+    // Post-commit side-effect: Broadcast realtime event only after successful commit!
+    if (result.notif && result.parentUserId) {
+      this.notifications.emitRealtimeNotification(result.parentUserId, result.notif);
+    }
+
+    return {
+      transaction: result.chargeTx,
+      balance: result.finState.balance,
+      debt: result.finState.debt,
+    };
+  }
+
   async paymentById(id: string) {
     const payment = await this.prisma.payment.findUnique({
       where: { id },

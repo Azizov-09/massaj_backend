@@ -6,7 +6,7 @@ import { Type } from 'class-transformer';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { RequestUser } from '../../common/types/request-user.type';
-import { FinanceQueryDto, RecordPaymentDto, RefundDto } from './dto/finance.dto';
+import { FinanceQueryDto, RecordChargeDto, RecordPaymentDto, RefundDto } from './dto/finance.dto';
 import { FinanceService } from './finance.service';
 
 class TransactionQueryDto {
@@ -57,6 +57,15 @@ export class FinanceController {
   @ApiResponse({ status: 201, description: 'Payment recorded and ledger updated.' })
   payment(@Body() dto: RecordPaymentDto, @CurrentUser() user: RequestUser) {
     return this.finance.recordPayment(dto, user.id);
+  }
+
+  // Service Charges (triggers automatic in-app debt notification if balance is insufficient)
+  @Roles(Role.SUPER_ADMIN, Role.ADMIN)
+  @Post('charges')
+  @ApiOperation({ summary: 'Record Service Charge', description: 'Records therapy service charge against parent balance. Automatically creates DEBT notification if balance is insufficient.' })
+  @ApiResponse({ status: 201, description: 'Charge recorded and parent notified if debt created.' })
+  charge(@Body() dto: RecordChargeDto, @CurrentUser() user: RequestUser) {
+    return this.finance.recordCharge(dto, user.id);
   }
 
   @Roles(Role.SUPER_ADMIN, Role.ADMIN)
