@@ -16,8 +16,6 @@ import { ChildrenModule } from '../modules/children/children.module';
 import { ServicesModule } from '../modules/services/services.module';
 import { NotificationsModule } from '../modules/notifications/notifications.module';
 import { FinanceModule } from '../modules/finance/finance.module';
-import { AppointmentsModule } from '../modules/appointments/appointments.module';
-import { SessionsModule } from '../modules/sessions/sessions.module';
 import { ClinicalModule } from '../modules/clinical/clinical.module';
 import { HealthModule } from '../modules/health/health.module';
 import { AnnouncementsModule } from '../modules/announcements/announcements.module';
@@ -46,8 +44,6 @@ import { EmployeesModule } from '../modules/employees/employees.module';
     ServicesModule,
     NotificationsModule,
     FinanceModule,
-    AppointmentsModule,
-    SessionsModule,
     ClinicalModule,
     HealthModule,
     AnnouncementsModule,

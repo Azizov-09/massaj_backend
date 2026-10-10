@@ -24,7 +24,7 @@ export class ClinicalController {
 
   @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.SPECIALIST)
   @Post('attendance')
-  @ApiOperation({ summary: 'Record Attendance for Appointment' })
+  @ApiOperation({ summary: 'Record Attendance for Child' })
   @ApiResponse({ status: 201, description: 'Attendance record created.' })
   attendance(@Body() dto: CreateAttendanceDto, @CurrentUser() user: RequestUser) {
     return this.clinical.attendance(dto, user);
@@ -37,6 +37,14 @@ export class ClinicalController {
   @ApiResponse({ status: 200, description: 'Attendance updated.' })
   updateAttendance(@Param('id') id: string, @Body() dto: UpdateAttendanceDto, @CurrentUser() user: RequestUser) {
     return this.clinical.updateAttendance(id, dto, user);
+  }
+
+  @Get('children/:childId/attendance')
+  @ApiOperation({ summary: 'List Attendance records for a Child' })
+  @ApiParam({ name: 'childId', description: 'Child UUID' })
+  @ApiResponse({ status: 200, description: 'List of attendance records.' })
+  attendances(@Param('childId') childId: string, @CurrentUser() user: RequestUser) {
+    return this.clinical.attendances(childId, user);
   }
 
   @Get('children/:childId/assessments')

@@ -12,14 +12,6 @@ import { NotificationsService } from '../notifications/notifications.service';
 import { RecordPaymentDto, RefundDto } from './dto/finance.dto';
 import { RequestUser } from '../../common/types/request-user.type';
 
-export interface SessionChargeInput {
-  sessionId: string;
-  appointmentId: string;
-  parentId: string;
-  parentUserId: string;
-  childId: string;
-  amount: number;
-}
 
 @Injectable()
 export class FinanceService {
@@ -338,80 +330,6 @@ export class FinanceService {
     return values;
   }
 
-  async chargeCompletedSession(
-    input: SessionChargeInput,
-    actorId: string,
-    tx: Prisma.TransactionClient,
-  ): Promise<void> {
-    await tx.transaction.create({
-      data: {
-        parentId: input.parentId,
-        childId: input.childId,
-        appointmentId: input.appointmentId,
-        sessionId: input.sessionId,
-        type: TransactionType.SESSION_CHARGE,
-        direction: TransactionDirection.OUT,
-        amount: input.amount,
-        description: 'Completed rehabilitation session charge',
-        idempotencyKey: `session-charge:${input.sessionId}`,
-      },
-    });
-
-    const rows = await tx.transaction.findMany({
-      where: { parentId: input.parentId },
-      select: { amount: true, direction: true, type: true, parentId: true },
-    });
-    const state = calculateFinancialState(rows, input.parentId);
-
-    await this.notifications.create(
-      {
-        userId: input.parentUserId,
-        type: NotificationType.SESSION,
-        title: 'Session completed',
-        message: `A session charge of ${input.amount.toLocaleString()} UZS was recorded.`,
-        relatedEntity: 'Session',
-        relatedEntityId: input.sessionId,
-        dedupeKey: `session-completed:${input.sessionId}`,
-        allowSms: false,
-      },
-      tx,
-    );
-
-    if (state.debt > 0) {
-      await this.notifications.create(
-        {
-          userId: input.parentUserId,
-          type: NotificationType.DEBT,
-          title: 'Outstanding balance',
-          message: `Sizda xizmatlar bo'yicha ${state.debt.toLocaleString()} UZS qarzdorlik mavjud.`,
-          relatedEntity: 'Session',
-          relatedEntityId: input.sessionId,
-          dedupeKey: `debt-session:${input.sessionId}`,
-          allowSms: true,
-        },
-        tx,
-      );
-    }
-
-    await tx.activityLog.create({
-      data: {
-        userId: actorId,
-        action: 'SESSION_CHARGED',
-        entity: 'Session',
-        entityId: input.sessionId,
-        description: `Created immutable session charge of ${input.amount} UZS`,
-      },
-    });
-
-    await tx.outboxEvent.create({
-      data: {
-        eventType: 'SESSION_COMPLETED',
-        aggregateType: 'Session',
-        aggregateId: input.sessionId,
-        payload: { sessionId: input.sessionId, debt: state.debt },
-      },
-    });
-  }
 
   private isUnique(error: unknown): boolean {
     return (

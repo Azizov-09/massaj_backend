@@ -94,8 +94,6 @@ async function bootstrap(): Promise<void> {
     .addTag('Employees', 'Non-medical staff management — receptionist, nurse, accountant, etc.')
     .addTag('Profiles', 'Admin, Specialist, and Parent account profile operations')
     .addTag('Children', 'Child records, intake profiles, and parental custody delegation')
-    .addTag('Appointments', 'Booking calendar, slot conflict detection, and lifecycle management')
-    .addTag('Sessions', 'Clinical execution, attendance verification, and therapy completion')
     .addTag('Clinical Records', 'SOAP clinical assessments, developmental milestones, and therapy goals')
     .addTag('Finance', 'Payments, balance calculations, refunds, and double-entry ledger transactions')
     .addTag('Services', 'Clinic therapy service catalog, duration, and price tiers')

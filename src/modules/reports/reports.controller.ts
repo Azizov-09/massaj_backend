@@ -72,13 +72,6 @@ export class ReportsController {
     return this.reports.attendance(q);
   }
 
-  @Get('sessions')
-  @ApiOperation({ summary: 'Rehabilitation Sessions Volume Report' })
-  @ApiResponse({ status: 200, description: 'Clinical sessions report.' })
-  sessions(@Query() q: ReportQueryDto) {
-    return this.reports.sessions(q);
-  }
-
   @Get('children')
   @ApiOperation({ summary: 'Enrolled Children Demographics & Intake Report' })
   @ApiResponse({ status: 200, description: 'Children intake report.' })

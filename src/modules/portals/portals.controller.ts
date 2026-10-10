@@ -22,19 +22,11 @@ export class PortalsController {
   }
 
   @Roles(Role.PARENT)
-  @Get('parent/my-appointments')
-  @ApiOperation({ summary: 'Parent Portal: My Appointments' })
-  @ApiResponse({ status: 200, description: 'Appointments for parent children.' })
-  appointments(@CurrentUser() user: RequestUser) {
-    return this.portals.parentAppointments(user.id);
-  }
-
-  @Roles(Role.PARENT)
-  @Get('parent/my-sessions')
-  @ApiOperation({ summary: 'Parent Portal: My Rehabilitation Sessions' })
-  @ApiResponse({ status: 200, description: 'Clinical sessions for parent children.' })
-  sessions(@CurrentUser() user: RequestUser) {
-    return this.portals.parentSessions(user.id);
+  @Get('parent/my-attendances')
+  @ApiOperation({ summary: 'Parent Portal: My Children Attendances' })
+  @ApiResponse({ status: 200, description: 'Attendance logs for parent children.' })
+  attendances(@CurrentUser() user: RequestUser) {
+    return this.portals.parentAttendances(user.id);
   }
 
   @Roles(Role.PARENT)
@@ -89,14 +81,6 @@ export class PortalsController {
 
   // SPECIALIST PORTAL
   @Roles(Role.SPECIALIST)
-  @Get('specialist/my-schedule')
-  @ApiOperation({ summary: 'Specialist Portal: My Clinical Schedule' })
-  @ApiResponse({ status: 200, description: 'Upcoming appointments and timetable.' })
-  schedule(@CurrentUser() user: RequestUser) {
-    return this.portals.specialistSchedule(user.id);
-  }
-
-  @Roles(Role.SPECIALIST)
   @Get('specialist/my-children')
   @ApiOperation({ summary: 'Specialist Portal: Assigned Patients' })
   @ApiResponse({ status: 200, description: 'List of children assigned to specialist.' })
@@ -105,11 +89,11 @@ export class PortalsController {
   }
 
   @Roles(Role.SPECIALIST)
-  @Get('specialist/my-sessions')
-  @ApiOperation({ summary: 'Specialist Portal: Conducted Sessions' })
-  @ApiResponse({ status: 200, description: 'History of treatment sessions.' })
-  specialistSessions(@CurrentUser() user: RequestUser) {
-    return this.portals.specialistSessions(user.id);
+  @Get('specialist/my-attendances')
+  @ApiOperation({ summary: 'Specialist Portal: Recorded Attendances' })
+  @ApiResponse({ status: 200, description: 'History of attendance records.' })
+  specialistAttendances(@CurrentUser() user: RequestUser) {
+    return this.portals.specialistAttendances(user.id);
   }
 
   @Roles(Role.SPECIALIST)

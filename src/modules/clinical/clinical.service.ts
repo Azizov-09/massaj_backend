@@ -1,5 +1,5 @@
 import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
-import { AppointmentStatus, GoalStatus, Prisma, Role } from '@prisma/client';
+import { GoalStatus, Prisma, Role } from '@prisma/client';
 import { PrismaService } from '../../database/prisma.service';
 import { AccessService } from '../../common/services/access.service';
 import { RequestUser } from '../../common/types/request-user.type';
@@ -9,8 +9,44 @@ import { CreateAssessmentDto, CreateAttendanceDto, CreateGoalDto, CreateProgress
 @Injectable()
 export class ClinicalService {
   constructor(private readonly prisma: PrismaService, private readonly access: AccessService, private readonly notifications: NotificationsService) {}
-  async attendance(dto: CreateAttendanceDto, user: RequestUser) { const appointment = await this.prisma.appointment.findUnique({ where: { id: dto.appointmentId } }); if (!appointment) throw new NotFoundException('Appointment not found'); await this.assertAppointmentWrite(appointment.specialistId, user); try { return await this.prisma.attendance.create({ data: { appointmentId: appointment.id, childId: appointment.childId, status: dto.status, note: dto.note } }); } catch (e) { if (this.isUnique(e)) throw new BadRequestException('Attendance already exists for this appointment'); throw e; } }
-  async updateAttendance(id: string, dto: UpdateAttendanceDto, user: RequestUser) { const row = await this.prisma.attendance.findUnique({ where: { id }, include: { appointment: true } }); if (!row) throw new NotFoundException('Attendance not found'); await this.assertAppointmentWrite(row.appointment.specialistId, user); return this.prisma.attendance.update({ where: { id }, data: dto }); }
+  async attendance(dto: CreateAttendanceDto, user: RequestUser) {
+    await this.access.assertChildAccess(user, dto.childId);
+    let specialistId: string | undefined = undefined;
+    if (user.role === Role.SPECIALIST) {
+      specialistId = await this.access.currentSpecialistId(user.id);
+    } else if (dto.specialistId) {
+      specialistId = dto.specialistId;
+    }
+    return this.prisma.attendance.create({
+      data: {
+        childId: dto.childId,
+        specialistId,
+        status: dto.status,
+        note: dto.note,
+        date: dto.date ? new Date(dto.date) : new Date(),
+      },
+    });
+  }
+  async updateAttendance(id: string, dto: UpdateAttendanceDto, user: RequestUser) {
+    const row = await this.prisma.attendance.findUnique({ where: { id } });
+    if (!row) throw new NotFoundException('Attendance not found');
+    if (row.specialistId) {
+      await this.assertSpecialistOwner(row.specialistId, user);
+    } else if (user.role === Role.SPECIALIST) {
+      throw new ForbiddenException('Only administrators or assigned specialists can update attendance');
+    }
+    return this.prisma.attendance.update({ where: { id }, data: dto });
+  }
+  async attendances(childId: string, user: RequestUser) {
+    await this.access.assertChildAccess(user, childId);
+    return this.prisma.attendance.findMany({
+      where: { childId },
+      include: {
+        specialist: { include: { user: { select: { fullName: true } } } },
+      },
+      orderBy: { date: 'desc' },
+    });
+  }
   async assessments(childId: string, user: RequestUser) { await this.access.assertChildAccess(user, childId); return this.prisma.assessment.findMany({ where: { childId }, include: { specialist: { include: { user: { select: { fullName: true } } } } }, orderBy: { createdAt: 'desc' } }); }
   async createAssessment(dto: CreateAssessmentDto, user: RequestUser) { const specialistId = await this.resolveSpecialist(dto.specialistId, user); await this.access.assertChildAccess({ ...user, role: Role.SPECIALIST, id: (await this.prisma.specialist.findUniqueOrThrow({ where: { id: specialistId }, select: { userId: true } })).userId }, dto.childId); return this.prisma.$transaction(async (tx) => { const row = await tx.assessment.create({ data: { ...dto, specialistId } }); await this.notifyParents(dto.childId, 'ASSESSMENT', 'New assessment available', 'A specialist added an assessment update.', row.id, tx); return row; }); }
   async updateAssessment(id: string, dto: UpdateAssessmentDto, user: RequestUser) { const row = await this.prisma.assessment.findUnique({ where: { id } }); if (!row) throw new NotFoundException('Assessment not found'); await this.assertSpecialistOwner(row.specialistId, user); return this.prisma.assessment.update({ where: { id }, data: dto }); }
@@ -23,9 +59,8 @@ export class ClinicalService {
   async completeGoal(id: string, user: RequestUser) { return this.updateGoal(id, { status: GoalStatus.COMPLETED, progress: 100 }, user); }
   async pauseGoal(id: string, user: RequestUser) { return this.updateGoal(id, { status: GoalStatus.PAUSED }, user); }
   private async resolveSpecialist(requestedId: string | undefined, user: RequestUser): Promise<string> { if (user.role === Role.SPECIALIST) return this.access.currentSpecialistId(user.id); if ((user.role === Role.ADMIN || user.role === Role.SUPER_ADMIN) && requestedId) return requestedId; throw new ForbiddenException('A specialist profile is required'); }
-  private async assertSpecialistChild(specialistId: string, childId: string): Promise<void> { const relation = await this.prisma.appointment.findFirst({ where: { childId, specialistId, status: { not: AppointmentStatus.CANCELLED } }, select: { id: true } }); if (!relation) throw new ForbiddenException('Specialist has no relationship with this child'); }
+  private async assertSpecialistChild(specialistId: string, childId: string): Promise<void> { const specialist = await this.prisma.specialist.findUnique({ where: { id: specialistId }, select: { status: true } }); if (!specialist || specialist.status !== 'ACTIVE') throw new ForbiddenException('Specialist must be active'); }
   private async assertSpecialistOwner(specialistId: string, user: RequestUser): Promise<void> { if (user.role === Role.ADMIN || user.role === Role.SUPER_ADMIN) return; const mine = await this.access.currentSpecialistId(user.id); if (mine !== specialistId) throw new ForbiddenException('Only the assigned specialist may change this record'); }
-  private async assertAppointmentWrite(specialistId: string, user: RequestUser): Promise<void> { return this.assertSpecialistOwner(specialistId, user); }
   private async notifyParents(childId: string, type: 'ASSESSMENT' | 'PROGRESS', title: string, message: string, entityId: string, tx: Prisma.TransactionClient) { const parents = await tx.childParent.findMany({ where: { childId }, select: { parent: { select: { userId: true } } } }); await Promise.all(parents.map(({ parent }) => this.notifications.create({ userId: parent.userId, type, title, message, relatedEntity: type === 'ASSESSMENT' ? 'Assessment' : 'ProgressEntry', relatedEntityId: entityId, dedupeKey: `${type.toLowerCase()}:${entityId}:${parent.userId}`, allowSms: false }, tx))); }
   private isUnique(error: unknown): boolean { return typeof error === 'object' && error !== null && 'code' in error && error.code === 'P2002'; }
 }

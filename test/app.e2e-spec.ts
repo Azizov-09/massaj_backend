@@ -5,7 +5,7 @@ import cookieParser from 'cookie-parser';
 import * as argon2 from 'argon2';
 import { AppModule } from '../src/app/app.module';
 import { PrismaService } from '../src/database/prisma.service';
-import { AppointmentStatus, Gender, PaymentMethod, Role, UserStatus } from '@prisma/client';
+import { Gender, PaymentMethod, Role, UserStatus } from '@prisma/client';
 
 describe('Rehabilitation Center CRM (Comprehensive E2E Tests)', () => {
   let app: INestApplication;
@@ -23,8 +23,6 @@ describe('Rehabilitation Center CRM (Comprehensive E2E Tests)', () => {
   let parent2ProfileId: string;
   let serviceId: string;
   let childId: string;
-  let appointmentId: string;
-  let sessionId: string;
   let paymentId: string;
 
   beforeAll(async () => {
@@ -66,12 +64,6 @@ describe('Rehabilitation Center CRM (Comprehensive E2E Tests)', () => {
     });
     await prisma.payment.deleteMany({
       where: { parent: { user: { phone: { in: testPhones } } } },
-    });
-    await prisma.session.deleteMany({
-      where: { specialist: { user: { phone: { in: testPhones } } } },
-    });
-    await prisma.appointment.deleteMany({
-      where: { specialist: { user: { phone: { in: testPhones } } } },
     });
     await prisma.childParent.deleteMany({
       where: { parent: { user: { phone: { in: testPhones } } } },
@@ -380,11 +372,11 @@ describe('Rehabilitation Center CRM (Comprehensive E2E Tests)', () => {
         .expect(403);
     });
 
-    it('Specialist without scheduled appointment is FORBIDDEN from accessing child (403)', async () => {
+    it('Specialist can access assigned child (200)', async () => {
       await request(app.getHttpServer())
         .get(`/api/v1/children/${childId}`)
         .set('Authorization', `Bearer ${specialistToken}`)
-        .expect(403);
+        .expect(200);
     });
 
     it('Parent 1 cannot access global finance or other parent balance (403)', async () => {
@@ -395,80 +387,71 @@ describe('Rehabilitation Center CRM (Comprehensive E2E Tests)', () => {
     });
   });
 
-  describe('Appointments & Sessions Lifecycle', () => {
-    it('creates Appointment without charging money at booking', async () => {
-      const startAt = new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString();
-      const endAt = new Date(Date.now() + 3 * 60 * 60 * 1000).toISOString();
+  describe('Clinical Attendance Lifecycle', () => {
+    let attendanceId: string;
 
+    it('records attendance for child without creating appointments', async () => {
       const res = await request(app.getHttpServer())
-        .post('/api/v1/appointments')
-        .set('Authorization', `Bearer ${adminToken}`)
+        .post('/api/v1/attendance')
+        .set('Authorization', `Bearer ${specialistToken}`)
         .send({
           childId,
-          parentId: parentProfileId,
           specialistId: specialistProfileId,
-          serviceId,
-          startAt,
-          endAt,
-          notes: 'Session 1 in plan',
+          status: 'PRESENT',
+          note: 'Child arrived on time and completed full physical therapy routine.',
         })
         .expect(201);
 
       expect(res.body.id).toBeDefined();
-      expect(res.body.status).toBe(AppointmentStatus.SCHEDULED);
-      appointmentId = res.body.id;
-
-      // Verify no financial transactions were created on appointment booking
-      const txs = await prisma.transaction.findMany({ where: { appointmentId } });
-      expect(txs.length).toBe(0);
+      expect(res.body.status).toBe('PRESENT');
+      attendanceId = res.body.id;
     });
 
-    it('confirms Appointment (SCHEDULED -> CONFIRMED)', async () => {
+    it('updates attendance note and status', async () => {
       const res = await request(app.getHttpServer())
-        .post(`/api/v1/appointments/${appointmentId}/confirm`)
-        .set('Authorization', `Bearer ${adminToken}`)
-        .expect(201);
-
-      expect(res.body.status).toBe(AppointmentStatus.CONFIRMED);
-    });
-
-    it('Specialist can now access assigned child after appointment is created (200)', async () => {
-      await request(app.getHttpServer())
-        .get(`/api/v1/children/${childId}`)
-        .set('Authorization', `Bearer ${specialistToken}`)
-        .expect(200);
-    });
-
-    it('starts Session from appointment with immutable servicePriceSnapshot', async () => {
-      const res = await request(app.getHttpServer())
-        .post(`/api/v1/appointments/${appointmentId}/start`)
-        .set('Authorization', `Bearer ${specialistToken}`)
-        .expect(201);
-
-      expect(res.body.appointment.status).toBe(AppointmentStatus.IN_PROGRESS);
-      expect(res.body.session.id).toBeDefined();
-      expect(res.body.session.servicePriceSnapshot).toBe(150_000);
-      sessionId = res.body.session.id;
-    });
-
-    it('completes Session: triggers atomic SESSION_CHARGE and creates debt alert', async () => {
-      const res = await request(app.getHttpServer())
-        .post(`/api/v1/sessions/${sessionId}/complete`)
+        .patch(`/api/v1/attendance/${attendanceId}`)
         .set('Authorization', `Bearer ${specialistToken}`)
         .send({
-          observation: 'Good muscle tone improvement, engaged positively.',
-          recommendation: 'Continue daily active movement exercises at home.',
+          note: 'Updated: Excellent engagement during physical therapy.',
         })
-        .expect(201);
+        .expect(200);
 
-      expect(res.body.status).toBe('COMPLETED');
+      expect(res.body.note).toContain('Excellent engagement');
+    });
 
-      // Verify SESSION_CHARGE was recorded in Transaction ledger
-      const tx = await prisma.transaction.findFirst({
-        where: { sessionId, type: 'SESSION_CHARGE' },
+    it('parent views attendance history in portal', async () => {
+      const res = await request(app.getHttpServer())
+        .get('/api/v1/parent/my-attendances')
+        .set('Authorization', `Bearer ${parentToken}`)
+        .expect(200);
+
+      expect(res.body.some((a: any) => a.id === attendanceId)).toBe(true);
+    });
+
+    it('specialist views attendance history in portal', async () => {
+      const res = await request(app.getHttpServer())
+        .get('/api/v1/specialist/my-attendances')
+        .set('Authorization', `Bearer ${specialistToken}`)
+        .expect(200);
+
+      expect(res.body.some((a: any) => a.id === attendanceId)).toBe(true);
+    });
+
+    it('simulates direct SESSION_CHARGE transaction for therapy service', async () => {
+      // Record a therapy service charge directly to test debt & payment ledger
+      const tx = await prisma.transaction.create({
+        data: {
+          parentId: parentProfileId,
+          childId,
+          type: 'SESSION_CHARGE',
+          direction: 'OUT',
+          amount: 150_000,
+          description: 'Charge for completed physical rehabilitation therapy',
+        },
       });
-      expect(tx).toBeDefined();
-      expect(tx!.amount).toBe(150_000);
+
+      expect(tx.id).toBeDefined();
+      expect(tx.amount).toBe(150_000);
 
       // Verify Parent 1 now has debt = 150_000
       const debtRes = await request(app.getHttpServer())
@@ -477,24 +460,6 @@ describe('Rehabilitation Center CRM (Comprehensive E2E Tests)', () => {
         .expect(200);
 
       expect(debtRes.body.debt).toBe(150_000);
-
-      // Verify in-app debt notification was generated for Parent 1
-      const notifs = await request(app.getHttpServer())
-        .get('/api/v1/notifications')
-        .set('Authorization', `Bearer ${parentToken}`)
-        .expect(200);
-
-      const debtNotif = notifs.body.items.find((n: any) => n.type === 'DEBT');
-      expect(debtNotif).toBeDefined();
-      expect(debtNotif.title).toBe('Outstanding balance');
-    });
-
-    it('second completion call on already completed session fails (400)', async () => {
-      await request(app.getHttpServer())
-        .post(`/api/v1/sessions/${sessionId}/complete`)
-        .set('Authorization', `Bearer ${specialistToken}`)
-        .send({ observation: 'Duplicate attempt' })
-        .expect(400);
     });
   });
 
@@ -598,7 +563,7 @@ describe('Rehabilitation Center CRM (Comprehensive E2E Tests)', () => {
 
       expect(res.body.totalRevenue).toBeDefined();
       expect(res.body.activeChildren).toBeGreaterThanOrEqual(1);
-      expect(res.body.completedSessions).toBeGreaterThanOrEqual(1);
+      expect(res.body.totalDebt).toBeDefined();
     });
 
     it('GET /api/v1/reports/financial returns structured transaction report', async () => {

@@ -41,19 +41,6 @@ enum ServiceStatus {
   ACTIVE
   ARCHIVED
 }
-enum AppointmentStatus { 
-  SCHEDULED
-  CONFIRMED
-  IN_PROGRESS
-  COMPLETED
-  CANCELLED
-  NO_SHOW
-}
-enum SessionStatus { 
-  IN_PROGRESS
-  COMPLETED
-  CANCELLED
-}
 enum AttendanceStatus { 
   PRESENT
   ABSENT
@@ -174,7 +161,6 @@ model Parent {
   address   String?  @db.VarChar(500)
   user      User     @relation(fields: [userId], references: [id])
   children  ChildParent[]
-  appointments Appointment[]
   payments  Payment[]
   transactions Transaction[]
   documents Document[]
@@ -191,8 +177,7 @@ model Specialist {
   bio             String?
   status          SpecialistStatus @default(ACTIVE)
   user            User             @relation(fields: [userId], references: [id])
-  appointments    Appointment[]
-  sessions        Session[]
+  attendances     Attendance[]
   assessments     Assessment[]
   progressEntries ProgressEntry[]
   goals           Goal[]
@@ -211,8 +196,6 @@ model Child {
   address     String?     @db.VarChar(500)
   notes       String?
   parents     ChildParent[]
-  appointments Appointment[]
-  sessions    Session[]
   attendances Attendance[]
   assessments Assessment[]
   progressEntries ProgressEntry[]
@@ -249,78 +232,26 @@ model Service {
   durationMinutes Int
   price           Int
   status          ServiceStatus @default(ACTIVE)
-  appointments    Appointment[]
-  sessions        Session[]
   createdAt       DateTime      @default(now())
   updatedAt       DateTime      @updatedAt
   @@index([status])
 }
 
-model Appointment {
-  id           String            @id @default(uuid()) @db.Uuid
-  childId      String            @db.Uuid
-  parentId     String            @db.Uuid
-  specialistId String            @db.Uuid
-  serviceId    String            @db.Uuid
-  startAt      DateTime
-  endAt        DateTime
-  status       AppointmentStatus @default(SCHEDULED)
-  notes        String?
-  child        Child             @relation(fields: [childId], references: [id])
-  parent       Parent            @relation(fields: [parentId], references: [id])
-  specialist   Specialist        @relation(fields: [specialistId], references: [id])
-  service      Service           @relation(fields: [serviceId], references: [id])
-  session      Session?
-  attendance   Attendance?
-  transactions Transaction[]
-  createdAt    DateTime          @default(now())
-  updatedAt    DateTime          @updatedAt
-  @@index([childId])
-  @@index([parentId])
-  @@index([specialistId])
-  @@index([serviceId])
-  @@index([startAt])
-  @@index([status])
-}
-
-model Session {
-  id                   String        @id @default(uuid()) @db.Uuid
-  appointmentId        String        @unique @db.Uuid
-  childId              String        @db.Uuid
-  specialistId         String        @db.Uuid
-  serviceId            String        @db.Uuid
-  servicePriceSnapshot Int
-  startedAt            DateTime
-  completedAt          DateTime?
-  status               SessionStatus @default(IN_PROGRESS)
-  note                 String?
-  observation          String?
-  recommendation       String?
-  appointment          Appointment   @relation(fields: [appointmentId], references: [id])
-  child                Child         @relation(fields: [childId], references: [id])
-  specialist           Specialist    @relation(fields: [specialistId], references: [id])
-  service              Service       @relation(fields: [serviceId], references: [id])
-  transactions         Transaction[]
-  createdAt            DateTime      @default(now())
-  updatedAt            DateTime      @updatedAt
-  @@index([childId])
-  @@index([specialistId])
-  @@index([status])
-  @@index([completedAt])
-}
-
 model Attendance {
-  id            String           @id @default(uuid()) @db.Uuid
-  appointmentId String           @unique @db.Uuid
-  childId       String           @db.Uuid
-  status        AttendanceStatus
-  note          String?
-  appointment   Appointment      @relation(fields: [appointmentId], references: [id])
-  child         Child            @relation(fields: [childId], references: [id])
-  createdAt     DateTime         @default(now())
-  updatedAt     DateTime         @updatedAt
+  id           String           @id @default(uuid()) @db.Uuid
+  childId      String           @db.Uuid
+  specialistId String?          @db.Uuid
+  date         DateTime         @default(now())
+  status       AttendanceStatus
+  note         String?
+  child        Child            @relation(fields: [childId], references: [id])
+  specialist   Specialist?      @relation(fields: [specialistId], references: [id])
+  createdAt    DateTime         @default(now())
+  updatedAt    DateTime         @updatedAt
   @@index([childId])
+  @@index([specialistId])
   @@index([status])
+  @@index([date])
 }
 
 model Assessment {
@@ -394,8 +325,6 @@ model Transaction {
   id             String               @id @default(uuid()) @db.Uuid
   parentId       String?              @db.Uuid
   childId        String?              @db.Uuid
-  appointmentId  String?              @db.Uuid
-  sessionId      String?              @db.Uuid
   type           TransactionType
   direction      TransactionDirection
   amount         Int
@@ -403,13 +332,9 @@ model Transaction {
   idempotencyKey String?              @unique @db.VarChar(255)
   parent         Parent?              @relation(fields: [parentId], references: [id])
   child          Child?               @relation(fields: [childId], references: [id])
-  appointment    Appointment?         @relation(fields: [appointmentId], references: [id])
-  session        Session?             @relation(fields: [sessionId], references: [id])
   createdAt      DateTime             @default(now())
   @@index([parentId])
   @@index([childId])
-  @@index([appointmentId])
-  @@index([sessionId])
   @@index([type])
   @@index([direction])
   @@index([createdAt])

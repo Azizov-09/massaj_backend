@@ -59,20 +59,12 @@ export class AnalyticsController {
     return this.analytics.debt(query.period);
   }
 
-  @Get('appointments')
-  @ApiOperation({ summary: 'Appointment Booking & Conversion Analytics' })
+  @Get('attendance')
+  @ApiOperation({ summary: 'Attendance Distribution & Specialist Volume Analytics' })
   @ApiQuery({ name: 'period', required: false, enum: PERIODS })
-  @ApiResponse({ status: 200, description: 'Appointment volume and distribution.' })
-  appointments(@Query() query: PeriodQueryDto) {
-    return this.analytics.appointments(query.period);
-  }
-
-  @Get('sessions')
-  @ApiOperation({ summary: 'Clinical Rehabilitation Sessions Analytics' })
-  @ApiQuery({ name: 'period', required: false, enum: PERIODS })
-  @ApiResponse({ status: 200, description: 'Sessions conducted.' })
-  sessions(@Query() query: PeriodQueryDto) {
-    return this.analytics.sessions(query.period);
+  @ApiResponse({ status: 200, description: 'Attendance volume and distribution.' })
+  attendance(@Query() query: PeriodQueryDto) {
+    return this.analytics.attendance(query.period);
   }
 
   @Get('children')

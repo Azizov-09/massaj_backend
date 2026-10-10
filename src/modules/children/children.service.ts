@@ -15,7 +15,17 @@ export class ChildrenService {
   async list(query: ChildQueryDto, user: RequestUser) {
     const where: Prisma.ChildWhereInput = { status: query.status, ...(query.search ? { OR: [{ firstName: { contains: query.search.trim(), mode: 'insensitive' } }, { lastName: { contains: query.search.trim(), mode: 'insensitive' } }] } : {}) };
     if (user.role === Role.PARENT) where.parents = { some: { parent: { userId: user.id } } };
-    if (user.role === Role.SPECIALIST) where.appointments = { some: { specialist: { userId: user.id } } };
+    if (user.role === Role.SPECIALIST) {
+      const specialistFilter = {
+        OR: [
+          { attendances: { some: { specialist: { userId: user.id } } } },
+          { assessments: { some: { specialist: { userId: user.id } } } },
+          { goals: { some: { specialist: { userId: user.id } } } },
+          { progressEntries: { some: { specialist: { userId: user.id } } } },
+        ],
+      };
+      where.AND = [specialistFilter];
+    }
     const [items, total] = await this.prisma.$transaction([this.prisma.child.findMany({ where, skip: (query.page - 1) * query.limit, take: query.limit, orderBy: { createdAt: 'desc' }, include: { parents: { include: { parent: { include: { user: { select: { fullName: true, phone: true } } } } } } } }), this.prisma.child.count({ where })]);
     return { items, meta: { page: query.page, limit: query.limit, total } };
   }

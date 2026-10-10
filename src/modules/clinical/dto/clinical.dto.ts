@@ -4,9 +4,14 @@ import { Type } from 'class-transformer';
 import { IsDateString, IsEnum, IsInt, IsOptional, IsString, IsUUID, Length, Max, Min } from 'class-validator';
 
 export class CreateAttendanceDto {
-  @ApiProperty({ description: 'Appointment UUID' })
+  @ApiProperty({ description: 'Target child UUID' })
   @IsUUID()
-  appointmentId!: string;
+  childId!: string;
+
+  @ApiPropertyOptional({ description: 'Optional specialist UUID' })
+  @IsOptional()
+  @IsUUID()
+  specialistId?: string;
 
   @ApiProperty({ enum: AttendanceStatus, description: 'Attendance outcome' })
   @IsEnum(AttendanceStatus)
@@ -17,6 +22,11 @@ export class CreateAttendanceDto {
   @IsString()
   @Length(1, 1000)
   note?: string;
+
+  @ApiPropertyOptional({ description: 'Optional date of attendance (ISO 8601)' })
+  @IsOptional()
+  @IsDateString()
+  date?: string;
 }
 
 export class UpdateAttendanceDto {

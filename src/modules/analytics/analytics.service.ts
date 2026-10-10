@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../../database/prisma.service';
-import { AppointmentStatus, SessionStatus, TransactionDirection, TransactionType } from '@prisma/client';
+import { AttendanceStatus, TransactionDirection, TransactionType } from '@prisma/client';
 
 type Period = 'today' | 'yesterday' | 'last7Days' | 'thisWeek' | 'thisMonth' | 'lastMonth' | 'thisYear';
 
@@ -59,9 +59,7 @@ export class AnalyticsService {
       monthlyDebtRows,
       activeChildrenCount,
       activeSpecialistsCount,
-      todayAppointmentsCount,
-      todaySessionsCount,
-      completedSessionsTotal,
+      todayAttendanceCount,
     ] = await this.prisma.$transaction([
       // total revenue = all PAYMENT IN transactions
       this.prisma.transaction.aggregate({
@@ -97,15 +95,11 @@ export class AnalyticsService {
       this.prisma.child.count({ where: { status: 'ACTIVE' } }),
       // active specialists
       this.prisma.specialist.count({ where: { status: 'ACTIVE' } }),
-      // today appointments
-      this.prisma.appointment.count({ where: { startAt: { gte: todayBounds.from, lt: todayBounds.to } } }),
-      // today sessions
-      this.prisma.session.count({ where: { startedAt: { gte: todayBounds.from, lt: todayBounds.to } } }),
-      // all completed sessions
-      this.prisma.session.count({ where: { status: SessionStatus.COMPLETED } }),
+      // today attendances
+      this.prisma.attendance.count({ where: { date: { gte: todayBounds.from, lt: todayBounds.to } } }),
     ]);
 
-    const appointmentStatuses = await this.prisma.appointment.groupBy({
+    const attendanceStatuses = await this.prisma.attendance.groupBy({
       by: ['status'],
       _count: { id: true },
       orderBy: { status: 'asc' },
@@ -128,15 +122,15 @@ export class AnalyticsService {
 
     const monthlyCharge = monthlyDebtRows.reduce((acc, r) => acc + r.amount, 0);
 
-    const statusMap = new Map<AppointmentStatus, number>();
-    for (const s of appointmentStatuses) {
+    const statusMap = new Map<AttendanceStatus, number>();
+    for (const s of attendanceStatuses) {
       statusMap.set(s.status, s._count.id);
     }
 
-    const totalAppts = appointmentStatuses.reduce((a, s) => a + s._count.id, 0);
-    const cancelled = statusMap.get(AppointmentStatus.CANCELLED) ?? 0;
-    const noShow = statusMap.get(AppointmentStatus.NO_SHOW) ?? 0;
-    const completed = statusMap.get(AppointmentStatus.COMPLETED) ?? 0;
+    const totalAttendances = attendanceStatuses.reduce((a, s) => a + s._count.id, 0);
+    const present = statusMap.get(AttendanceStatus.PRESENT) ?? 0;
+    const absent = statusMap.get(AttendanceStatus.ABSENT) ?? 0;
+    const noShow = statusMap.get(AttendanceStatus.NO_SHOW) ?? 0;
 
     return {
       totalRevenue: totalRevenueAgg._sum.amount ?? 0,
@@ -148,12 +142,10 @@ export class AnalyticsService {
       currentBalance,
       activeChildren: activeChildrenCount,
       activeSpecialists: activeSpecialistsCount,
-      todayAppointments: todayAppointmentsCount,
-      todaySessions: todaySessionsCount,
-      completedSessions: completedSessionsTotal,
-      attendanceRate: totalAppts > 0 ? ((completed / totalAppts) * 100).toFixed(1) : '0.0',
-      cancellationRate: totalAppts > 0 ? ((cancelled / totalAppts) * 100).toFixed(1) : '0.0',
-      noShowRate: totalAppts > 0 ? ((noShow / totalAppts) * 100).toFixed(1) : '0.0',
+      todayAttendance: todayAttendanceCount,
+      attendanceRate: totalAttendances > 0 ? ((present / totalAttendances) * 100).toFixed(1) : '0.0',
+      absenceRate: totalAttendances > 0 ? ((absent / totalAttendances) * 100).toFixed(1) : '0.0',
+      noShowRate: totalAttendances > 0 ? ((noShow / totalAttendances) * 100).toFixed(1) : '0.0',
     };
   }
 
@@ -218,38 +210,18 @@ export class AnalyticsService {
     };
   }
 
-  async appointments(period: Period) {
+  async attendance(period: Period) {
     const bounds = periodBounds(period);
     const [byStatus, bySpecialist] = await this.prisma.$transaction([
-      this.prisma.appointment.groupBy({
+      this.prisma.attendance.groupBy({
         by: ['status'],
-        where: { startAt: { gte: bounds.from, lt: bounds.to } },
+        where: { date: { gte: bounds.from, lt: bounds.to } },
         _count: { id: true },
         orderBy: { status: 'asc' },
       }),
-      this.prisma.appointment.groupBy({
+      this.prisma.attendance.groupBy({
         by: ['specialistId'],
-        where: { startAt: { gte: bounds.from, lt: bounds.to } },
-        _count: { id: true },
-        orderBy: { _count: { id: 'desc' } },
-        take: 10,
-      }),
-    ]);
-    return { period, byStatus, bySpecialist };
-  }
-
-  async sessions(period: Period) {
-    const bounds = periodBounds(period);
-    const [byStatus, bySpecialist] = await this.prisma.$transaction([
-      this.prisma.session.groupBy({
-        by: ['status'],
-        where: { startedAt: { gte: bounds.from, lt: bounds.to } },
-        _count: { id: true },
-        orderBy: { status: 'asc' },
-      }),
-      this.prisma.session.groupBy({
-        by: ['specialistId'],
-        where: { startedAt: { gte: bounds.from, lt: bounds.to } },
+        where: { date: { gte: bounds.from, lt: bounds.to }, specialistId: { not: null } },
         _count: { id: true },
         orderBy: { _count: { id: 'desc' } },
         take: 10,
@@ -269,17 +241,17 @@ export class AnalyticsService {
   }
 
   async specialists() {
-    const [byStatus, sessionsBySpecialist] = await this.prisma.$transaction([
+    const [byStatus, attendanceBySpecialist] = await this.prisma.$transaction([
       this.prisma.specialist.groupBy({ by: ['status'], _count: { id: true }, orderBy: { status: 'asc' } }),
-      this.prisma.session.groupBy({
+      this.prisma.attendance.groupBy({
         by: ['specialistId'],
-        where: { status: SessionStatus.COMPLETED },
+        where: { specialistId: { not: null } },
         _count: { id: true },
         orderBy: { _count: { id: 'desc' } },
         take: 20,
       }),
     ]);
-    return { byStatus, sessionsBySpecialist };
+    return { byStatus, attendanceBySpecialist };
   }
 
   async notificationStats() {

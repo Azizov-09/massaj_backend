@@ -2,16 +2,6 @@ import { ApiPropertyOptional } from '@nestjs/swagger';
 import { IsBoolean, IsOptional } from 'class-validator';
 
 export class UpdateNotificationPreferencesDto {
-  @ApiPropertyOptional({ description: 'In-app notification for appointments' })
-  @IsOptional()
-  @IsBoolean()
-  appointmentInApp?: boolean;
-
-  @ApiPropertyOptional({ description: 'SMS notification for appointments' })
-  @IsOptional()
-  @IsBoolean()
-  appointmentSms?: boolean;
-
   @ApiPropertyOptional({ description: 'In-app notification for payment receipts' })
   @IsOptional()
   @IsBoolean()
@@ -31,16 +21,6 @@ export class UpdateNotificationPreferencesDto {
   @IsOptional()
   @IsBoolean()
   debtSms?: boolean;
-
-  @ApiPropertyOptional({ description: 'In-app notification for rehabilitation sessions' })
-  @IsOptional()
-  @IsBoolean()
-  sessionInApp?: boolean;
-
-  @ApiPropertyOptional({ description: 'SMS notification for rehabilitation sessions' })
-  @IsOptional()
-  @IsBoolean()
-  sessionSms?: boolean;
 
   @ApiPropertyOptional({ description: 'In-app notification for clinical assessments' })
   @IsOptional()

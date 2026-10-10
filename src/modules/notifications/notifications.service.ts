@@ -177,10 +177,8 @@ export class NotificationsService {
     const preference = await tx.notificationPreference.findUnique({ where: { userId } });
     if (!preference) return false;
     const fields: Partial<Record<NotificationType, keyof typeof preference>> = {
-      APPOINTMENT: 'appointmentSms',
       PAYMENT: 'paymentSms',
       DEBT: 'debtSms',
-      SESSION: 'sessionSms',
       ANNOUNCEMENT: 'announcementSms',
     };
     const field = fields[type];

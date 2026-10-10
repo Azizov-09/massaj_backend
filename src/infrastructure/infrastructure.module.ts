@@ -10,8 +10,6 @@ import { HttpSmsProvider } from './sms/http-sms.provider';
 import { OutboxProcessor } from './outbox/outbox.processor';
 import { OutboxService } from './outbox/outbox.service';
 import { RealtimeGateway } from './realtime/realtime.gateway';
-import { AppointmentReminderScheduler } from './reminders/appointment-reminder.scheduler';
-import { AppointmentReminderProcessor } from './reminders/appointment-reminder.processor';
 
 @Module({
   imports: [
@@ -41,7 +39,6 @@ import { AppointmentReminderProcessor } from './reminders/appointment-reminder.p
       },
     }),
     BullModule.registerQueue({ name: 'outbox' }),
-    BullModule.registerQueue({ name: 'reminders' }),
   ],
   providers: [
     RedisHealthService,
@@ -49,8 +46,6 @@ import { AppointmentReminderProcessor } from './reminders/appointment-reminder.p
     OutboxService,
     OutboxProcessor,
     RealtimeGateway,
-    AppointmentReminderScheduler,
-    AppointmentReminderProcessor,
   ],
   exports: [RedisHealthService, RealtimeGateway],
 })

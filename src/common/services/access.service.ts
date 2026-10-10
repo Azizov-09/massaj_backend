@@ -15,11 +15,8 @@ export class AccessService {
       if (relation) return;
     }
     if (user.role === Role.SPECIALIST) {
-      const specialist = await this.prisma.specialist.findUnique({ where: { userId: user.id }, select: { id: true } });
-      if (specialist) {
-        const relation = await this.prisma.appointment.findFirst({ where: { childId, specialistId: specialist.id }, select: { id: true } });
-        if (relation) return;
-      }
+      const specialist = await this.prisma.specialist.findUnique({ where: { userId: user.id }, select: { id: true, status: true } });
+      if (specialist && specialist.status === 'ACTIVE') return;
     }
     throw new ForbiddenException('You do not have access to this child');
   }

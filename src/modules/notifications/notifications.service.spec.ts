@@ -57,14 +57,14 @@ describe('NotificationsService (Preferences & Deduplication)', () => {
 
       await service.create({
         userId: 'user-1',
-        type: NotificationType.APPOINTMENT,
-        title: 'Appt Reminder',
-        message: 'Reminder text',
-        dedupeKey: 'appointment-reminder:24h:appt-1',
+        type: NotificationType.PAYMENT,
+        title: 'Payment Receipt',
+        message: 'Receipt text',
+        dedupeKey: 'payment:receipt-1',
       });
 
       expect(mockPrisma.notification.findUnique).toHaveBeenCalledWith({
-        where: { dedupeKey: 'appointment-reminder:24h:appt-1' },
+        where: { dedupeKey: 'payment:receipt-1' },
         select: { id: true },
       });
       expect(mockPrisma.notification.create).not.toHaveBeenCalled();
@@ -76,26 +76,26 @@ describe('NotificationsService (Preferences & Deduplication)', () => {
       mockPrisma.notification.create.mockResolvedValue({
         id: 'new-notif-id',
         userId: 'user-1',
-        type: NotificationType.APPOINTMENT,
+        type: NotificationType.PAYMENT,
       });
       mockPrisma.notificationPreference.findUnique.mockResolvedValue({
-        appointmentSms: true,
+        paymentSms: true,
       });
 
       await service.create({
         userId: 'user-1',
-        type: NotificationType.APPOINTMENT,
-        title: 'Appt Scheduled',
-        message: 'You have a new appt',
-        dedupeKey: 'appt-created:appt-1',
+        type: NotificationType.PAYMENT,
+        title: 'Payment Received',
+        message: 'You have a new payment',
+        dedupeKey: 'payment:pay-1',
         allowSms: true,
       });
 
       expect(mockPrisma.notification.create).toHaveBeenCalledWith({
         data: expect.objectContaining({
           userId: 'user-1',
-          type: NotificationType.APPOINTMENT,
-          dedupeKey: 'appt-created:appt-1',
+          type: NotificationType.PAYMENT,
+          dedupeKey: 'payment:pay-1',
         }),
       });
       expect(mockPrisma.notificationDelivery.create).toHaveBeenCalledWith({
@@ -164,14 +164,14 @@ describe('NotificationsService (Preferences & Deduplication)', () => {
       mockPrisma.notification.create.mockResolvedValue({
         id: 'notif-4',
         userId: 'user-1',
-        type: NotificationType.SESSION,
+        type: NotificationType.ASSESSMENT,
       });
 
       await service.create({
         userId: 'user-1',
-        type: NotificationType.SESSION,
-        title: 'Session Completed',
-        message: 'Session summary',
+        type: NotificationType.ASSESSMENT,
+        title: 'Assessment Recorded',
+        message: 'Assessment summary',
         allowSms: false,
       });
 

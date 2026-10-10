@@ -5,8 +5,6 @@ import {
   SpecialistStatus,
   EmployeeStatus,
   ServiceStatus,
-  AppointmentStatus,
-  SessionStatus,
   AttendanceStatus,
   GoalStatus,
   PaymentMethod,
@@ -466,88 +464,51 @@ export async function seedDatabase(prisma: PrismaClient, force = false): Promise
     serviceRecords.push({ id: service.id, name: service.name, price: service.price });
   }
 
-  // 8. Appointments & Sessions (60 realistic appointments)
-  console.log('[Seed] 8/12 Seeding 60 Appointments and Sessions...');
-  const appointmentCount = await prisma.appointment.count();
-  if (appointmentCount < 50 && childRecords.length > 0 && specialistRecords.length > 0 && serviceRecords.length > 0) {
-    const statuses: AppointmentStatus[] = [
-      AppointmentStatus.COMPLETED,
-      AppointmentStatus.COMPLETED,
-      AppointmentStatus.COMPLETED,
-      AppointmentStatus.SCHEDULED,
-      AppointmentStatus.CONFIRMED,
-      AppointmentStatus.IN_PROGRESS,
+  // 8. Attendance (60 realistic attendance records)
+  console.log('[Seed] 8/12 Seeding 60 Attendance records...');
+  const attendanceCount = await prisma.attendance.count();
+  if (attendanceCount < 50 && childRecords.length > 0 && specialistRecords.length > 0 && serviceRecords.length > 0) {
+    const statuses: AttendanceStatus[] = [
+      AttendanceStatus.PRESENT,
+      AttendanceStatus.PRESENT,
+      AttendanceStatus.PRESENT,
+      AttendanceStatus.LATE,
+      AttendanceStatus.ABSENT,
+      AttendanceStatus.NO_SHOW,
     ];
 
     for (let i = 0; i < 60; i++) {
       const child = childRecords[i % childRecords.length]!;
       const specialist = specialistRecords[i % specialistRecords.length]!;
       const service = serviceRecords[i % serviceRecords.length]!;
-      const status = statuses[i % statuses.length] ?? AppointmentStatus.SCHEDULED;
+      const status = statuses[i % statuses.length] ?? AttendanceStatus.PRESENT;
 
       const now = new Date();
-      const isPast = status === AppointmentStatus.COMPLETED;
-      const dayOffset = isPast ? -Math.floor((i % 25) + 1) : Math.floor((i % 10) + 1);
+      const dayOffset = -Math.floor((i % 25) + 1);
+      const date = new Date(now.getTime() + dayOffset * 86400000);
+      date.setHours(9 + (i % 8), (i % 2) * 30, 0, 0);
 
-      const startAt = new Date(now.getTime() + dayOffset * 86400000);
-      startAt.setHours(9 + (i % 8), (i % 2) * 30, 0, 0);
-
-      const endAt = new Date(startAt.getTime() + 45 * 60000);
-
-      const appt = await prisma.appointment.create({
+      await prisma.attendance.create({
         data: {
           childId: child.id,
-          parentId: child.parentId,
           specialistId: specialist.id,
-          serviceId: service.id,
-          startAt,
-          endAt,
+          date,
           status,
-          notes: `${service.name} bo'yicha ${i + 1}-reja uchrashuvi`,
+          note: status === AttendanceStatus.PRESENT ? "O'z vaqtida kelgan va qatnashgan." : 'Qoldirilgan yoki kechikkan.',
         },
       });
 
-      if (status === AppointmentStatus.COMPLETED || status === AppointmentStatus.IN_PROGRESS) {
-        const isCompleted = status === AppointmentStatus.COMPLETED;
-        const session = await prisma.session.create({
+      if (status === AttendanceStatus.PRESENT && i % 2 === 0) {
+        await prisma.transaction.create({
           data: {
-            appointmentId: appt.id,
+            parentId: child.parentId,
             childId: child.id,
-            specialistId: specialist.id,
-            serviceId: service.id,
-            servicePriceSnapshot: service.price,
-            startedAt: startAt,
-            completedAt: isCompleted ? endAt : null,
-            status: isCompleted ? SessionStatus.COMPLETED : SessionStatus.IN_PROGRESS,
-            note: 'Seans reja asosida to\'liq o\'tkazildi. Bola muolajani ijobiy qabul qildi.',
-            observation: 'Mushak tonusida yengillashish kuzatildi, harakat amplitudasi kengaygan.',
-            recommendation: 'Uyda yengil mashqlar va issiq vanna davom ettirilsin.',
+            type: TransactionType.SESSION_CHARGE,
+            direction: TransactionDirection.OUT,
+            amount: service.price,
+            description: `Davolash xizmati uchun hisoblandi: ${service.name}`,
           },
         });
-
-        await prisma.attendance.create({
-          data: {
-            appointmentId: appt.id,
-            childId: child.id,
-            status: AttendanceStatus.PRESENT,
-            note: 'O\'z vaqtida kelgan va qatnashgan.',
-          },
-        });
-
-        if (isCompleted) {
-          await prisma.transaction.create({
-            data: {
-              parentId: child.parentId,
-              childId: child.id,
-              appointmentId: appt.id,
-              sessionId: session.id,
-              type: TransactionType.SESSION_CHARGE,
-              direction: TransactionDirection.OUT,
-              amount: service.price,
-              description: `Yakunlangan seans uchun hisoblandi: ${service.name}`,
-            },
-          });
-        }
       }
     }
   }
@@ -733,8 +694,7 @@ export async function seedDatabase(prisma: PrismaClient, force = false): Promise
     finalChildren,
     finalEmployees,
     finalServices,
-    finalAppointments,
-    finalSessions,
+    finalAttendances,
     finalPayments,
     finalTransactions,
   ] = await Promise.all([
@@ -745,8 +705,7 @@ export async function seedDatabase(prisma: PrismaClient, force = false): Promise
     prisma.child.count(),
     prisma.employee.count(),
     prisma.service.count(),
-    prisma.appointment.count(),
-    prisma.session.count(),
+    prisma.attendance.count(),
     prisma.payment.count(),
     prisma.transaction.count(),
   ]);
@@ -762,8 +721,7 @@ export async function seedDatabase(prisma: PrismaClient, force = false): Promise
 👶 Bolalar (Children):             ${finalChildren} ta
 🏢 Xodimlar (Employees):           ${finalEmployees} ta
 💆 Xizmatlar (Services):           ${finalServices} ta
-📅 Qabullar (Appointments):        ${finalAppointments} ta
-⏱ Seanslar (Sessions):            ${finalSessions} ta
+📋 Davomat (Attendances):          ${finalAttendances} ta
 💰 To'lovlar (Payments):           ${finalPayments} ta
 📊 Tranzaksiyalar (Qarzdorlar):    ${finalTransactions} ta
 =====================================================

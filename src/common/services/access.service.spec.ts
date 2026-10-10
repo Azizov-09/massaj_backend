@@ -23,9 +23,6 @@ describe('AccessService (Permission Helpers & IDOR Protection)', () => {
       specialist: {
         findUnique: jest.fn(),
       },
-      appointment: {
-        findFirst: jest.fn(),
-      },
     };
     service = new AccessService(mockPrisma as unknown as PrismaService);
   });
@@ -71,19 +68,17 @@ describe('AccessService (Permission Helpers & IDOR Protection)', () => {
       );
     });
 
-    it('allows SPECIALIST access if specialist has an appointment with child', async () => {
+    it('allows SPECIALIST access if specialist profile is ACTIVE', async () => {
       mockPrisma.child.findUnique.mockResolvedValue({ id: 'c1' });
-      mockPrisma.specialist.findUnique.mockResolvedValue({ id: 'spec-profile-1' });
-      mockPrisma.appointment.findFirst.mockResolvedValue({ id: 'appt-1' });
+      mockPrisma.specialist.findUnique.mockResolvedValue({ id: 'spec-profile-1', status: 'ACTIVE' });
 
       const specialistUser: RequestUser = { id: 'spec-user-1', role: Role.SPECIALIST, tokenVersion: 0 };
       await expect(service.assertChildAccess(specialistUser, 'c1')).resolves.not.toThrow();
     });
 
-    it('prevents IDOR: throws ForbiddenException if SPECIALIST has no appointment with child', async () => {
+    it('prevents IDOR: throws ForbiddenException if SPECIALIST profile is not ACTIVE or missing', async () => {
       mockPrisma.child.findUnique.mockResolvedValue({ id: 'c1' });
-      mockPrisma.specialist.findUnique.mockResolvedValue({ id: 'spec-profile-1' });
-      mockPrisma.appointment.findFirst.mockResolvedValue(null);
+      mockPrisma.specialist.findUnique.mockResolvedValue(null);
 
       const specialistUser: RequestUser = { id: 'spec-user-1', role: Role.SPECIALIST, tokenVersion: 0 };
       await expect(service.assertChildAccess(specialistUser, 'c1')).rejects.toThrow(

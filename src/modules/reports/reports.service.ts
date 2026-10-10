@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../../database/prisma.service';
-import { AttendanceStatus, SessionStatus, TransactionDirection, TransactionType } from '@prisma/client';
+import { AttendanceStatus, TransactionDirection, TransactionType } from '@prisma/client';
 
 export interface ReportFilter {
   from?: string;
@@ -68,8 +68,9 @@ export class ReportsService {
   async attendance(filter: ReportFilter) {
     const { page = 1, limit = 50 } = filter;
     const where = {
-      createdAt: dateRange(filter.from, filter.to),
+      date: dateRange(filter.from, filter.to),
       childId: filter.childId,
+      specialistId: filter.specialistId,
       status: filter.status as AttendanceStatus | undefined,
     };
     const [items, total, byStatus] = await this.prisma.$transaction([
@@ -77,9 +78,9 @@ export class ReportsService {
         where,
         include: {
           child: { select: { firstName: true, lastName: true } },
-          appointment: { include: { service: { select: { name: true } } } },
+          specialist: { include: { user: { select: { fullName: true } } } },
         },
-        orderBy: { createdAt: 'desc' },
+        orderBy: { date: 'desc' },
         skip: (page - 1) * limit,
         take: limit,
       }),
@@ -87,39 +88,6 @@ export class ReportsService {
       this.prisma.attendance.groupBy({ by: ['status'], where, _count: { _all: true }, orderBy: { status: 'asc' } }),
     ]);
     return { items, meta: { page, limit, total, totalPages: Math.ceil(total / limit) }, byStatus };
-  }
-
-  async sessions(filter: ReportFilter) {
-    const { page = 1, limit = 50 } = filter;
-    const where = {
-      startedAt: dateRange(filter.from, filter.to),
-      childId: filter.childId,
-      specialistId: filter.specialistId,
-      status: filter.status as SessionStatus | undefined,
-    };
-    const [items, total] = await this.prisma.$transaction([
-      this.prisma.session.findMany({
-        where,
-        include: {
-          child: { select: { firstName: true, lastName: true } },
-          specialist: { include: { user: { select: { fullName: true } } } },
-          service: { select: { name: true, durationMinutes: true } },
-        },
-        orderBy: { startedAt: 'desc' },
-        skip: (page - 1) * limit,
-        take: limit,
-      }),
-      this.prisma.session.count({ where }),
-    ]);
-    const revenueAgg = await this.prisma.session.aggregate({
-      where: { ...where, status: SessionStatus.COMPLETED },
-      _sum: { servicePriceSnapshot: true },
-    });
-    return {
-      items,
-      meta: { page, limit, total, totalPages: Math.ceil(total / limit) },
-      totalRevenue: revenueAgg._sum.servicePriceSnapshot ?? 0,
-    };
   }
 
   async children(filter: ReportFilter) {
@@ -133,7 +101,7 @@ export class ReportsService {
         where,
         include: {
           parents: { include: { parent: { include: { user: { select: { fullName: true, phone: true } } } } } },
-          _count: { select: { sessions: true, assessments: true } },
+          _count: { select: { attendances: true, assessments: true } },
         },
         orderBy: { createdAt: 'desc' },
         skip: (page - 1) * limit,
@@ -150,7 +118,7 @@ export class ReportsService {
       this.prisma.specialist.findMany({
         include: {
           user: { select: { fullName: true, phone: true, status: true } },
-          _count: { select: { sessions: true, appointments: true, assessments: true } },
+          _count: { select: { attendances: true, assessments: true } },
         },
         orderBy: { createdAt: 'desc' },
         skip: (page - 1) * limit,
