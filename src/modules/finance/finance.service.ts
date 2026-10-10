@@ -73,7 +73,7 @@ export class FinanceService {
             relatedEntity: 'Payment',
             relatedEntityId: payment.id,
             dedupeKey: `payment-received:${payment.id}`,
-            allowSms: true,
+            allowSms: false,
           },
           tx,
         );
@@ -148,7 +148,7 @@ export class FinanceService {
             relatedEntity: 'Transaction',
             relatedEntityId: refund.id,
             dedupeKey: `refund:${refund.id}`,
-            allowSms: true,
+            allowSms: false,
           },
           tx,
         );
