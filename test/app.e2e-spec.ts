@@ -21,7 +21,6 @@ describe('Rehabilitation Center CRM (Comprehensive E2E Tests)', () => {
   let specialistProfileId: string;
   let parentProfileId: string;
   let parent2ProfileId: string;
-  let serviceId: string;
   let childId: string;
   let paymentId: string;
 
@@ -310,7 +309,6 @@ describe('Rehabilitation Center CRM (Comprehensive E2E Tests)', () => {
 
       expect(res.body.id).toBeDefined();
       expect(res.body.price).toBe(150_000);
-      serviceId = res.body.id;
     });
 
     it('creates Child (ADMIN only)', async () => {

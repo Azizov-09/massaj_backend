@@ -13,7 +13,32 @@ export class ChildrenService {
     await this.log(actorId, 'CHILD_CREATED', child.id, 'Created child profile'); return child;
   }
   async list(query: ChildQueryDto, user: RequestUser) {
-    const where: Prisma.ChildWhereInput = { status: query.status, ...(query.search ? { OR: [{ firstName: { contains: query.search.trim(), mode: 'insensitive' } }, { lastName: { contains: query.search.trim(), mode: 'insensitive' } }] } : {}) };
+    const term = query.search?.trim();
+    const where: Prisma.ChildWhereInput = {
+      status: query.status,
+      ...(term
+        ? {
+            OR: [
+              { firstName: { contains: term, mode: 'insensitive' } },
+              { lastName: { contains: term, mode: 'insensitive' } },
+              {
+                parents: {
+                  some: {
+                    parent: {
+                      user: {
+                        OR: [
+                          { fullName: { contains: term, mode: 'insensitive' } },
+                          { phone: { contains: term } },
+                        ],
+                      },
+                    },
+                  },
+                },
+              },
+            ],
+          }
+        : {}),
+    };
     if (user.role === Role.PARENT) where.parents = { some: { parent: { userId: user.id } } };
     if (user.role === Role.SPECIALIST) {
       const specialistFilter = {

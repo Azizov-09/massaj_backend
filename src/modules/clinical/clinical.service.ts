@@ -1,4 +1,4 @@
-import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { GoalStatus, Prisma, Role } from '@prisma/client';
 import { PrismaService } from '../../database/prisma.service';
 import { AccessService } from '../../common/services/access.service';
@@ -59,7 +59,12 @@ export class ClinicalService {
   async completeGoal(id: string, user: RequestUser) { return this.updateGoal(id, { status: GoalStatus.COMPLETED, progress: 100 }, user); }
   async pauseGoal(id: string, user: RequestUser) { return this.updateGoal(id, { status: GoalStatus.PAUSED }, user); }
   private async resolveSpecialist(requestedId: string | undefined, user: RequestUser): Promise<string> { if (user.role === Role.SPECIALIST) return this.access.currentSpecialistId(user.id); if ((user.role === Role.ADMIN || user.role === Role.SUPER_ADMIN) && requestedId) return requestedId; throw new ForbiddenException('A specialist profile is required'); }
-  private async assertSpecialistChild(specialistId: string, childId: string): Promise<void> { const specialist = await this.prisma.specialist.findUnique({ where: { id: specialistId }, select: { status: true } }); if (!specialist || specialist.status !== 'ACTIVE') throw new ForbiddenException('Specialist must be active'); }
+  private async assertSpecialistChild(specialistId: string, childId: string): Promise<void> {
+    const specialist = await this.prisma.specialist.findUnique({ where: { id: specialistId }, select: { status: true } });
+    if (!specialist || specialist.status !== 'ACTIVE') throw new ForbiddenException('Specialist must be active');
+    const child = await this.prisma.child.findUnique({ where: { id: childId }, select: { id: true } });
+    if (!child) throw new NotFoundException('Child not found');
+  }
   private async assertSpecialistOwner(specialistId: string, user: RequestUser): Promise<void> { if (user.role === Role.ADMIN || user.role === Role.SUPER_ADMIN) return; const mine = await this.access.currentSpecialistId(user.id); if (mine !== specialistId) throw new ForbiddenException('Only the assigned specialist may change this record'); }
   private async notifyParents(childId: string, type: 'ASSESSMENT' | 'PROGRESS', title: string, message: string, entityId: string, tx: Prisma.TransactionClient) { const parents = await tx.childParent.findMany({ where: { childId }, select: { parent: { select: { userId: true } } } }); await Promise.all(parents.map(({ parent }) => this.notifications.create({ userId: parent.userId, type, title, message, relatedEntity: type === 'ASSESSMENT' ? 'Assessment' : 'ProgressEntry', relatedEntityId: entityId, dedupeKey: `${type.toLowerCase()}:${entityId}:${parent.userId}`, allowSms: false }, tx))); }
   private isUnique(error: unknown): boolean { return typeof error === 'object' && error !== null && 'code' in error && error.code === 'P2002'; }

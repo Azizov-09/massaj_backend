@@ -4,7 +4,6 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
 import { JwtModule } from '@nestjs/jwt';
 import { AppConfiguration } from '../config/configuration';
 import { PrismaModule } from '../database/prisma.module';
-import { NotificationsModule } from '../modules/notifications/notifications.module';
 import { RedisHealthService } from './redis/redis-health.service';
 import { HttpSmsProvider } from './sms/http-sms.provider';
 import { OutboxProcessor } from './outbox/outbox.processor';
@@ -14,7 +13,6 @@ import { RealtimeGateway } from './realtime/realtime.gateway';
 @Module({
   imports: [
     PrismaModule,
-    NotificationsModule,
     JwtModule.registerAsync({
       imports: [ConfigModule],
       inject: [ConfigService],

@@ -3,7 +3,6 @@ import { EmployeeStatus } from '@prisma/client';
 import { Type } from 'class-transformer';
 import {
   IsDateString,
-  IsDecimal,
   IsEmail,
   IsEnum,
   IsNumber,

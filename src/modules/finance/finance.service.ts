@@ -251,15 +251,18 @@ export class FinanceService {
   }
 
   async allDebtors() {
-    const rows = await this.prisma.transaction.findMany({
+    const grouped = await this.prisma.transaction.groupBy({
+      by: ['parentId', 'direction'],
       where: { type: { not: TransactionType.EXPENSE }, parentId: { not: null } },
-      select: { parentId: true, direction: true, amount: true, type: true },
+      _sum: { amount: true },
+      orderBy: { parentId: 'asc' },
     });
     const netByParent = new Map<string, number>();
-    for (const row of rows) {
+    for (const row of grouped) {
       if (!row.parentId) continue;
+      const amount = row._sum?.amount ?? 0;
       const current = netByParent.get(row.parentId) ?? 0;
-      const delta = row.direction === TransactionDirection.IN ? row.amount : -row.amount;
+      const delta = row.direction === TransactionDirection.IN ? amount : -amount;
       netByParent.set(row.parentId, current + delta);
     }
     const debtorIds = Array.from(netByParent.entries())

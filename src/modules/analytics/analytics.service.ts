@@ -4,17 +4,18 @@ import { AttendanceStatus, TransactionDirection, TransactionType } from '@prisma
 
 type Period = 'today' | 'yesterday' | 'last7Days' | 'thisWeek' | 'thisMonth' | 'lastMonth' | 'thisYear';
 
-function tashkentNow(): Date {
-  // Asia/Tashkent = UTC+5, no DST
-  return new Date(Date.now() + 5 * 60 * 60 * 1000);
+const TASHKENT_OFFSET_MS = 5 * 60 * 60 * 1000;
+
+function tashkentMidnight(year: number, month: number, day: number): Date {
+  return new Date(Date.UTC(year, month, day) - TASHKENT_OFFSET_MS);
 }
 
 function periodBounds(period: Period): { from: Date; to: Date } {
-  const now = tashkentNow();
+  const now = new Date(Date.now() + TASHKENT_OFFSET_MS);
   const y = now.getUTCFullYear();
   const m = now.getUTCMonth();
   const d = now.getUTCDate();
-  const todayStart = new Date(Date.UTC(y, m, d));
+  const todayStart = tashkentMidnight(y, m, d);
 
   switch (period) {
     case 'today':
@@ -31,11 +32,11 @@ function periodBounds(period: Period): { from: Date; to: Date } {
       return { from: weekStart, to: new Date(todayStart.getTime() + 86_400_000) };
     }
     case 'thisMonth':
-      return { from: new Date(Date.UTC(y, m, 1)), to: new Date(Date.UTC(y, m + 1, 1)) };
+      return { from: tashkentMidnight(y, m, 1), to: tashkentMidnight(y, m + 1, 1) };
     case 'lastMonth':
-      return { from: new Date(Date.UTC(y, m - 1, 1)), to: new Date(Date.UTC(y, m, 1)) };
+      return { from: tashkentMidnight(y, m - 1, 1), to: tashkentMidnight(y, m, 1) };
     case 'thisYear':
-      return { from: new Date(Date.UTC(y, 0, 1)), to: new Date(Date.UTC(y + 1, 0, 1)) };
+      return { from: tashkentMidnight(y, 0, 1), to: tashkentMidnight(y + 1, 0, 1) };
     default:
       return { from: todayStart, to: new Date(todayStart.getTime() + 86_400_000) };
   }
@@ -56,7 +57,7 @@ export class AnalyticsService {
       monthlyRevenueAgg,
       yearlyRevenueAgg,
       totalDebtRows,
-      monthlyDebtRows,
+      monthlyDebtAgg,
       activeChildrenCount,
       activeSpecialistsCount,
       todayAttendanceCount,
@@ -82,14 +83,16 @@ export class AnalyticsService {
         _sum: { amount: true },
       }),
       // total debt: derive net per parent, sum negatives
-      this.prisma.transaction.findMany({
-        where: { type: { not: TransactionType.EXPENSE } },
-        select: { parentId: true, direction: true, amount: true },
+      this.prisma.transaction.groupBy({
+        by: ['parentId', 'direction'],
+        where: { type: { not: TransactionType.EXPENSE }, parentId: { not: null } },
+        _sum: { amount: true },
+        orderBy: { parentId: 'asc' },
       }),
       // monthly charges to calculate monthly debt created
-      this.prisma.transaction.findMany({
+      this.prisma.transaction.aggregate({
         where: { type: TransactionType.SESSION_CHARGE, createdAt: { gte: monthBounds.from, lt: monthBounds.to } },
-        select: { amount: true },
+        _sum: { amount: true },
       }),
       // active children
       this.prisma.child.count({ where: { status: 'ACTIVE' } }),
@@ -109,8 +112,9 @@ export class AnalyticsService {
     const netByParent = new Map<string, number>();
     for (const row of totalDebtRows) {
       if (!row.parentId) continue;
+      const amount = row._sum?.amount ?? 0;
       const current = netByParent.get(row.parentId) ?? 0;
-      const delta = row.direction === TransactionDirection.IN ? row.amount : -row.amount;
+      const delta = row.direction === TransactionDirection.IN ? amount : -amount;
       netByParent.set(row.parentId, current + delta);
     }
     let totalDebt = 0;
@@ -120,7 +124,7 @@ export class AnalyticsService {
       else currentBalance += net;
     }
 
-    const monthlyCharge = monthlyDebtRows.reduce((acc, r) => acc + r.amount, 0);
+    const monthlyCharge = monthlyDebtAgg._sum.amount ?? 0;
 
     const statusMap = new Map<AttendanceStatus, number>();
     for (const s of attendanceStatuses) {
@@ -179,15 +183,18 @@ export class AnalyticsService {
   async debt(period: Period) {
     const bounds = periodBounds(period);
     // Find all families with net < 0 (in debt)
-    const rows = await this.prisma.transaction.findMany({
-      where: { type: { not: TransactionType.EXPENSE } },
-      select: { parentId: true, direction: true, amount: true, type: true },
+    const rows = await this.prisma.transaction.groupBy({
+      by: ['parentId', 'direction'],
+      where: { type: { not: TransactionType.EXPENSE }, parentId: { not: null } },
+      _sum: { amount: true },
+      orderBy: { parentId: 'asc' },
     });
     const netByParent = new Map<string, number>();
     for (const row of rows) {
       if (!row.parentId) continue;
+      const amount = row._sum?.amount ?? 0;
       const current = netByParent.get(row.parentId) ?? 0;
-      const delta = row.direction === TransactionDirection.IN ? row.amount : -row.amount;
+      const delta = row.direction === TransactionDirection.IN ? amount : -amount;
       netByParent.set(row.parentId, current + delta);
     }
     const debtors = Array.from(netByParent.entries())

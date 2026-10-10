@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException, Optional } from '@nestjs/common';
 import {
   NotificationChannel,
   NotificationDeliveryStatus,
@@ -10,6 +10,7 @@ import { PrismaService } from '../../database/prisma.service';
 import { ConfigService } from '@nestjs/config';
 import { AppConfiguration } from '../../config/configuration';
 import { UpdateNotificationPreferencesDto } from './dto/preferences.dto';
+import { RealtimeGateway } from '../../infrastructure/realtime/realtime.gateway';
 
 export interface CreateNotificationInput {
   userId: string;
@@ -28,6 +29,7 @@ export class NotificationsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly config: ConfigService<AppConfiguration>,
+    @Optional() private readonly realtime?: RealtimeGateway,
   ) {}
 
   /**
@@ -59,6 +61,9 @@ export class NotificationsService {
         dedupeKey: input.dedupeKey,
       },
     });
+
+    // Broadcast in real-time over WebSocket to user's personal room
+    this.realtime?.emitToUser(input.userId, 'notification:new', notification);
 
     // Queue SMS delivery if allowed and preference permits
     if (input.allowSms && (await this.allowsSms(input.userId, input.type, tx))) {

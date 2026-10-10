@@ -31,7 +31,13 @@ interface AuthenticatedSocket extends Socket {
   data: SocketData;
 }
 
-@WebSocketGateway({ cors: { origin: process.env.FRONTEND_URL, credentials: true }, namespace: '/realtime' })
+@WebSocketGateway({
+  cors: {
+    origin: true,
+    credentials: true,
+  },
+  namespace: '/realtime',
+})
 export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect {
   @WebSocketServer() server!: Server;
 
