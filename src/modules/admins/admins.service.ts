@@ -130,26 +130,63 @@ export class AdminsService {
   }
 
   async update(id: string, dto: UpdateAdminDto, actorId: string) {
-    await this.findOne(id);
-    const updated = await this.prisma.user.update({
-      where: { id },
-      data: {
-        ...(dto.fullName && { fullName: dto.fullName }),
-        ...(dto.email !== undefined && { email: dto.email }),
-      },
-      select: {
-        id: true,
-        fullName: true,
-        phone: true,
-        email: true,
-        role: true,
-        status: true,
-        updatedAt: true,
-      },
-    });
+    const existing = await this.findOne(id);
 
-    await this.log(actorId, 'ADMIN_UPDATED', 'User', id, `Updated admin profile: ${id}`);
-    return updated;
+    let phone: string | undefined;
+    if (dto.phone) {
+      try {
+        phone = normalizeUzbekPhone(dto.phone);
+      } catch {
+        throw new ConflictException('Invalid phone number format');
+      }
+    }
+
+    let passwordHash: string | undefined;
+    if (dto.password) {
+      passwordHash = await argon2.hash(dto.password, { type: argon2.argon2id });
+    }
+
+    let statusVal: UserStatus | undefined;
+    if (dto.status) {
+      if (dto.status === 'ACTIVE') statusVal = UserStatus.ACTIVE;
+      else if (dto.status === 'INACTIVE' || dto.status === 'ARCHIVED') statusVal = UserStatus.INACTIVE;
+      else if (dto.status === 'BLOCKED') statusVal = UserStatus.BLOCKED;
+    }
+
+    try {
+      const updated = await this.prisma.user.update({
+        where: { id },
+        data: {
+          ...(dto.fullName && { fullName: dto.fullName }),
+          ...(dto.email !== undefined && { email: dto.email }),
+          ...(phone && { phone }),
+          ...(dto.role && { role: dto.role }),
+          ...(statusVal && { status: statusVal }),
+          ...(passwordHash && {
+            passwordHash,
+            tokenVersion: { increment: 1 },
+            passwordChangedAt: new Date(),
+          }),
+        },
+        select: {
+          id: true,
+          fullName: true,
+          phone: true,
+          email: true,
+          role: true,
+          status: true,
+          updatedAt: true,
+        },
+      });
+
+      await this.log(actorId, 'ADMIN_UPDATED', 'User', id, `Updated admin profile: ${updated.fullName} (${updated.role})`);
+      return updated;
+    } catch (err: any) {
+      if (err?.code === 'P2002') {
+        throw new ConflictException('Phone number or email already in use');
+      }
+      throw err;
+    }
   }
 
   async archive(id: string, actorId: string) {

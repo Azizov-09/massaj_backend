@@ -50,8 +50,37 @@ export class UpdateAdminDto {
   @Length(2, 160)
   fullName?: string;
 
+  @ApiPropertyOptional({ description: 'Uzbek phone number (+998XXXXXXXXX)' })
+  @IsOptional()
+  @IsString()
+  @Length(9, 32)
+  phone?: string;
+
   @ApiPropertyOptional({ description: 'Email address' })
   @IsOptional()
   @IsEmail()
   email?: string;
+
+  @ApiPropertyOptional({ enum: [Role.SUPER_ADMIN, Role.ADMIN], description: 'Admin role' })
+  @IsOptional()
+  @IsEnum(Role)
+  @IsIn([Role.SUPER_ADMIN, Role.ADMIN])
+  role?: Role;
+
+  @ApiPropertyOptional({ enum: ['ACTIVE', 'INACTIVE', 'BLOCKED'], description: 'User status' })
+  @IsOptional()
+  @IsString()
+  status?: string;
+
+  @ApiPropertyOptional({
+    description: 'New password (min 12 chars, uppercase, lowercase, digit)',
+    format: 'password',
+  })
+  @IsOptional()
+  @IsString()
+  @Length(12, 128)
+  @Matches(/[a-z]/, { message: 'Password must contain at least one lowercase letter' })
+  @Matches(/[A-Z]/, { message: 'Password must contain at least one uppercase letter' })
+  @Matches(/\d/, { message: 'Password must contain at least one digit' })
+  password?: string;
 }
