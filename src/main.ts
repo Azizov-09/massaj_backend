@@ -120,13 +120,16 @@ async function bootstrap(): Promise<void> {
   const prisma = app.get(PrismaService);
   prisma.enableShutdownHooks(app);
 
-  // Auto-seed mock data on startup if AUTO_SEED=true or if database has no users
+  // Auto-seed mock data on startup only in non-production environments if explicitly requested or empty db
+  const isProd = process.env.NODE_ENV === 'production';
   const autoSeed = process.env.AUTO_SEED === 'true';
   try {
     const userCount = await prisma.user.count();
-    if (autoSeed || userCount === 0) {
-      logger.log(`[AutoSeed] Checking/seeding database (autoSeed=${autoSeed}, currentUsers=${userCount})...`);
+    if (!isProd && (autoSeed || userCount === 0)) {
+      logger.log(`[AutoSeed] Checking/seeding development database (autoSeed=${autoSeed}, currentUsers=${userCount})...`);
       await seedDatabase(prisma, autoSeed);
+    } else if (isProd && userCount === 0) {
+      logger.warn('[AutoSeed] Production database has 0 users. Mock seeding is disabled in production for safety.');
     }
   } catch (err) {
     logger.error('[AutoSeed] Error during initial database seed check:', err);

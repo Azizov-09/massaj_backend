@@ -209,4 +209,46 @@ describe('FinanceService Unit Tests', () => {
       });
     });
   });
+
+  describe('Date Range Filtering for Payments and Transactions', () => {
+    it('applies date range bounds on payments query', async () => {
+      mockPrisma.payment.findMany.mockResolvedValue([]);
+      mockPrisma.payment.count.mockResolvedValue(0);
+
+      await service.payments('p-1', 'c-1', 1, 20, '2026-10-01', '2026-10-10');
+
+      expect(mockPrisma.payment.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            parentId: 'p-1',
+            childId: 'c-1',
+            paidAt: expect.objectContaining({
+              gte: new Date('2026-10-01'),
+              lte: expect.any(Date),
+            }),
+          }),
+        }),
+      );
+    });
+
+    it('applies date range bounds on transactions query', async () => {
+      mockPrisma.transaction.findMany.mockResolvedValue([]);
+      mockPrisma.transaction.count.mockResolvedValue(0);
+
+      await service.transactions('p-1', 'c-1', 1, 20, '2026-10-01', '2026-10-10');
+
+      expect(mockPrisma.transaction.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            parentId: 'p-1',
+            childId: 'c-1',
+            createdAt: expect.objectContaining({
+              gte: new Date('2026-10-01'),
+              lte: expect.any(Date),
+            }),
+          }),
+        }),
+      );
+    });
+  });
 });

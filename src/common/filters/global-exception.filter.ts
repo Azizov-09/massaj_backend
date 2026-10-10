@@ -9,7 +9,12 @@ export class GlobalExceptionFilter implements ExceptionFilter {
     const status = exception instanceof HttpException ? exception.getStatus() : HttpStatus.INTERNAL_SERVER_ERROR;
     const exceptionResponse = exception instanceof HttpException ? exception.getResponse() : undefined;
     const detail = typeof exceptionResponse === 'object' && exceptionResponse !== null ? exceptionResponse : { message: exceptionResponse ?? 'Internal server error' };
-    if (status >= 500) this.logger.error({ path: request.url, method: request.method, error: exception instanceof Error ? exception.message : 'Unknown error' });
+    if (status >= 500) {
+      this.logger.error(
+        `${request.method} ${request.url} - ${exception instanceof Error ? exception.message : 'Unknown error'}`,
+        exception instanceof Error ? exception.stack : undefined,
+      );
+    }
     response.status(status).json({ statusCode: status, timestamp: new Date().toISOString(), path: request.url, ...detail });
   }
 }

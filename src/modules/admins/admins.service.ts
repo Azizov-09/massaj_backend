@@ -158,13 +158,34 @@ export class AdminsService {
       throw new ForbiddenException('You cannot archive your own account');
     }
 
-    const updated = await this.prisma.user.update({
-      where: { id },
-      data: { status: UserStatus.BLOCKED },
-      select: { id: true, fullName: true, status: true, updatedAt: true },
+    const updated = await this.prisma.$transaction(async (tx) => {
+      const u = await tx.user.update({
+        where: { id },
+        data: {
+          status: UserStatus.BLOCKED,
+          tokenVersion: { increment: 1 },
+        },
+        select: { id: true, fullName: true, status: true, updatedAt: true },
+      });
+
+      await tx.userSession.updateMany({
+        where: { userId: id, revokedAt: null },
+        data: { revokedAt: new Date() },
+      });
+
+      await tx.activityLog.create({
+        data: {
+          userId: actorId,
+          action: 'ADMIN_ARCHIVED',
+          entity: 'User',
+          entityId: id,
+          description: `Archived admin: ${admin.fullName} and revoked all active sessions`,
+        },
+      });
+
+      return u;
     });
 
-    await this.log(actorId, 'ADMIN_ARCHIVED', 'User', id, `Archived admin: ${admin.fullName}`);
     return updated;
   }
 

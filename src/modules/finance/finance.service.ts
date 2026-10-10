@@ -13,6 +13,19 @@ import { RecordPaymentDto, RefundDto } from './dto/finance.dto';
 import { RequestUser } from '../../common/types/request-user.type';
 
 
+function buildDateRange(from?: string, to?: string) {
+  const result: { gte?: Date; lte?: Date } = {};
+  if (from) result.gte = new Date(from);
+  if (to) {
+    const toDate = new Date(to);
+    if (!to.includes('T')) {
+      toDate.setUTCHours(23, 59, 59, 999);
+    }
+    result.lte = toDate;
+  }
+  return Object.keys(result).length ? result : undefined;
+}
+
 @Injectable()
 export class FinanceService {
   constructor(
@@ -22,11 +35,11 @@ export class FinanceService {
 
   async recordPayment(dto: RecordPaymentDto, actorId: string) {
     try {
-      return await this.prisma.$transaction(async (tx) => {
+      const result = await this.prisma.$transaction(async (tx) => {
         // Idempotency check
         if (dto.idempotencyKey) {
           const duplicate = await tx.payment.findUnique({ where: { idempotencyKey: dto.idempotencyKey } });
-          if (duplicate) return duplicate;
+          if (duplicate) return { payment: duplicate, notif: null, parentUserId: null };
         }
         // Verify parent-child relationship
         const relation = await tx.childParent.findUnique({
@@ -65,7 +78,7 @@ export class FinanceService {
           },
         });
 
-        await this.notifications.create(
+        const notif = await this.notifications.create(
           {
             userId: relation.parent.userId,
             type: NotificationType.PAYMENT,
@@ -98,8 +111,14 @@ export class FinanceService {
           },
         });
 
-        return payment;
+        return { payment, notif, parentUserId: relation.parent.userId };
       }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+
+      // Post-commit side-effect: Broadcast realtime event only after successful commit!
+      if (result.notif && result.parentUserId) {
+        this.notifications.emitRealtimeNotification(result.parentUserId, result.notif);
+      }
+      return result.payment;
     } catch (error) {
       if (this.isUnique(error)) throw new ConflictException('Duplicate payment request');
       throw error;
@@ -108,7 +127,7 @@ export class FinanceService {
 
   async refund(paymentId: string, dto: RefundDto, actorId: string) {
     try {
-      return await this.prisma.$transaction(async (tx) => {
+      const result = await this.prisma.$transaction(async (tx) => {
         const payment = await tx.payment.findUnique({
           where: { id: paymentId },
           include: { parent: { select: { userId: true } } },
@@ -144,7 +163,7 @@ export class FinanceService {
           },
         });
 
-        await this.notifications.create(
+        const notif = await this.notifications.create(
           {
             userId: payment.parent.userId,
             type: NotificationType.PAYMENT,
@@ -177,8 +196,14 @@ export class FinanceService {
           },
         });
 
-        return refund;
+        return { refund, notif, parentUserId: payment.parent.userId };
       }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+
+      // Post-commit side-effect: Broadcast realtime event only after successful commit!
+      if (result.notif && result.parentUserId) {
+        this.notifications.emitRealtimeNotification(result.parentUserId, result.notif);
+      }
+      return result.refund;
     } catch (error) {
       if (this.isUnique(error)) throw new ConflictException('Duplicate refund request');
       throw error;
@@ -209,8 +234,12 @@ export class FinanceService {
     return tx;
   }
 
-  async payments(parentId?: string, childId?: string, page = 1, limit = 50) {
-    const where: Prisma.PaymentWhereInput = { parentId, childId };
+  async payments(parentId?: string, childId?: string, page = 1, limit = 50, from?: string, to?: string) {
+    const where: Prisma.PaymentWhereInput = {
+      parentId,
+      childId,
+      ...(from || to ? { paidAt: buildDateRange(from, to) } : {}),
+    };
     const [items, total] = await this.prisma.$transaction([
       this.prisma.payment.findMany({
         where,
@@ -227,8 +256,12 @@ export class FinanceService {
     return { items, meta: { page, limit, total, totalPages: Math.ceil(total / limit) } };
   }
 
-  async transactions(parentId?: string, childId?: string, page = 1, limit = 50) {
-    const where: Prisma.TransactionWhereInput = { parentId, childId };
+  async transactions(parentId?: string, childId?: string, page = 1, limit = 50, from?: string, to?: string) {
+    const where: Prisma.TransactionWhereInput = {
+      parentId,
+      childId,
+      ...(from || to ? { createdAt: buildDateRange(from, to) } : {}),
+    };
     const [items, total] = await this.prisma.$transaction([
       this.prisma.transaction.findMany({
         where,

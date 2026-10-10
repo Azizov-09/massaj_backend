@@ -16,7 +16,13 @@ export interface ReportFilter {
 function dateRange(from?: string, to?: string) {
   const result: { gte?: Date; lte?: Date } = {};
   if (from) result.gte = new Date(from);
-  if (to) result.lte = new Date(to);
+  if (to) {
+    const toDate = new Date(to);
+    if (!to.includes('T')) {
+      toDate.setUTCHours(23, 59, 59, 999);
+    }
+    result.lte = toDate;
+  }
   return Object.keys(result).length ? result : undefined;
 }
 

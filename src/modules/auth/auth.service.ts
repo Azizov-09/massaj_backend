@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { JwtService, JwtSignOptions } from '@nestjs/jwt';
 import { User, UserStatus } from '@prisma/client';
 import * as argon2 from 'argon2';
+import * as crypto from 'crypto';
 import { PrismaService } from '../../database/prisma.service';
 import { AppConfiguration } from '../../config/configuration';
 import { normalizeUzbekPhone } from '../../common/utils/phone.util';
@@ -49,7 +50,11 @@ export class AuthService {
       ]);
       throw new UnauthorizedException('Refresh token reuse detected; all sessions revoked');
     }
-    if (session.user.status !== UserStatus.ACTIVE || session.user.tokenVersion !== payload.tv || !(await argon2.verify(session.refreshTokenHash, refreshToken))) {
+    if (
+      session.user.status !== UserStatus.ACTIVE ||
+      session.user.tokenVersion !== payload.tv ||
+      !(await this.verifyRefreshToken(session.refreshTokenHash, refreshToken))
+    ) {
       throw new UnauthorizedException('Invalid refresh token');
     }
     await this.prisma.userSession.update({ where: { id: session.id }, data: { revokedAt: new Date() } });
@@ -82,12 +87,24 @@ export class AuthService {
     ]);
   }
 
+  private hashRefreshToken(token: string): string {
+    return `sha256:${crypto.createHash('sha256').update(token).digest('hex')}`;
+  }
+
+  private async verifyRefreshToken(storedHash: string, token: string): Promise<boolean> {
+    if (storedHash.startsWith('sha256:')) {
+      const calculated = this.hashRefreshToken(token);
+      return crypto.timingSafeEqual(Buffer.from(storedHash), Buffer.from(calculated));
+    }
+    return argon2.verify(storedHash, token);
+  }
+
   private async issueSessionTokens(user: User, device?: string, ip?: string): Promise<AuthTokens> {
     const expiresIn = this.config.getOrThrow('jwt.refreshExpiresIn', { infer: true });
     const expiresAt = new Date(Date.now() + this.parseDuration(expiresIn));
     const provisional = await this.prisma.userSession.create({ data: { userId: user.id, refreshTokenHash: 'pending', device, ip, expiresAt } });
     const refreshToken = await this.jwt.signAsync({ sub: user.id, sid: provisional.id, tv: user.tokenVersion }, { secret: this.config.getOrThrow('jwt.refreshSecret', { infer: true }), expiresIn: expiresIn as JwtSignOptions['expiresIn'] });
-    await this.prisma.userSession.update({ where: { id: provisional.id }, data: { refreshTokenHash: await argon2.hash(refreshToken, { type: argon2.argon2id }) } });
+    await this.prisma.userSession.update({ where: { id: provisional.id }, data: { refreshTokenHash: this.hashRefreshToken(refreshToken) } });
     const accessExpiresIn = this.config.getOrThrow('jwt.accessExpiresIn', { infer: true });
     const accessToken = await this.jwt.signAsync({ sub: user.id, role: user.role, tv: user.tokenVersion }, { secret: this.config.getOrThrow('jwt.accessSecret', { infer: true }), expiresIn: accessExpiresIn as JwtSignOptions['expiresIn'] });
     return { accessToken, refreshToken };

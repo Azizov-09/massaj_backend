@@ -178,4 +178,74 @@ describe('NotificationsService (Preferences & Deduplication)', () => {
       expect(mockPrisma.notificationDelivery.create).not.toHaveBeenCalled();
     });
   });
+
+  describe('Real-time Transaction Decoupling (Premature Side-Effect Protection)', () => {
+    let mockRealtime: any;
+    let serviceWithRealtime: NotificationsService;
+
+    beforeEach(() => {
+      mockRealtime = {
+        emitToUser: jest.fn(),
+      };
+      serviceWithRealtime = new NotificationsService(
+        mockPrisma as unknown as PrismaService,
+        mockConfig as unknown as ConfigService<any>,
+        mockRealtime,
+      );
+    });
+
+    it('does NOT broadcast WebSocket event when create is invoked inside an external transaction', async () => {
+      const mockTx: any = {
+        notification: {
+          findUnique: jest.fn().mockResolvedValue(null),
+          create: jest.fn().mockResolvedValue({ id: 'tx-notif-1', userId: 'user-1' }),
+        },
+        notificationPreference: { findUnique: jest.fn().mockResolvedValue(null) },
+      };
+
+      await serviceWithRealtime.create(
+        {
+          userId: 'user-1',
+          type: NotificationType.PAYMENT,
+          title: 'Payment in Tx',
+          message: 'Tx text',
+          allowSms: false,
+        },
+        mockTx,
+      );
+
+      // Verify notification created in transaction
+      expect(mockTx.notification.create).toHaveBeenCalled();
+      // Verify premature WebSocket event was NOT emitted!
+      expect(mockRealtime.emitToUser).not.toHaveBeenCalled();
+    });
+
+    it('broadcasts WebSocket event immediately when running outside an external transaction', async () => {
+      mockPrisma.notification.findUnique.mockResolvedValue(null);
+      mockPrisma.notification.create.mockResolvedValue({ id: 'standalone-notif', userId: 'user-2' });
+
+      await serviceWithRealtime.create({
+        userId: 'user-2',
+        type: NotificationType.SYSTEM,
+        title: 'System message',
+        message: 'System alert',
+        allowSms: false,
+      });
+
+      expect(mockRealtime.emitToUser).toHaveBeenCalledWith(
+        'user-2',
+        'notification:new',
+        expect.objectContaining({ id: 'standalone-notif' }),
+      );
+    });
+
+    it('emits event when emitRealtimeNotification is explicitly called post-commit', () => {
+      serviceWithRealtime.emitRealtimeNotification('user-3', { id: 'committed-notif' });
+      expect(mockRealtime.emitToUser).toHaveBeenCalledWith(
+        'user-3',
+        'notification:new',
+        { id: 'committed-notif' },
+      );
+    });
+  });
 });

@@ -8,7 +8,38 @@ import { CreateAnnouncementDto } from './dto/announcements.dto';
 export class AnnouncementsService {
   constructor(private readonly prisma: PrismaService, private readonly notifications: NotificationsService) {}
   async create(dto: CreateAnnouncementDto, userId: string) { if (dto.audience === AnnouncementAudience.SPECIFIC_PARENTS && !dto.recipientUserIds?.length) throw new BadRequestException('Specific parent announcements need recipients'); const scheduledAt = dto.scheduledAt ? new Date(dto.scheduledAt) : undefined; if (scheduledAt && scheduledAt <= new Date()) throw new BadRequestException('scheduledAt must be in the future'); return this.prisma.announcement.create({ data: { createdByUserId: userId, title: dto.title, message: dto.message, audience: dto.audience, sendInApp: dto.sendInApp ?? true, sendSms: dto.sendSms ?? false, scheduledAt, status: scheduledAt ? AnnouncementStatus.SCHEDULED : AnnouncementStatus.DRAFT } }); }
-  async publish(id: string, actorId: string, requestedRecipients?: string[]) { return this.prisma.$transaction(async (tx) => { const announcement = await tx.announcement.findUnique({ where: { id } }); if (!announcement) throw new NotFoundException('Announcement not found'); if (!([AnnouncementStatus.DRAFT, AnnouncementStatus.SCHEDULED] as AnnouncementStatus[]).includes(announcement.status)) throw new BadRequestException('Announcement cannot be published'); const recipients = await this.resolveRecipients(announcement.audience, requestedRecipients, tx); if (!recipients.length) throw new BadRequestException('No eligible parent recipients'); await tx.announcementRecipient.createMany({ data: recipients.map((userId) => ({ announcementId: id, userId })), skipDuplicates: true }); if (announcement.sendInApp || announcement.sendSms) await Promise.all(recipients.map((userId) => this.notifications.create({ userId, type: NotificationType.ANNOUNCEMENT, title: announcement.title, message: announcement.message, relatedEntity: 'Announcement', relatedEntityId: announcement.id, dedupeKey: `announcement:${announcement.id}:${userId}`, allowSms: false }, tx))); const result = await tx.announcement.update({ where: { id }, data: { status: AnnouncementStatus.PUBLISHED, publishedAt: new Date() } }); await tx.activityLog.create({ data: { userId: actorId, action: 'ANNOUNCEMENT_PUBLISHED', entity: 'Announcement', entityId: id, description: `Published announcement to ${recipients.length} parents` } }); await tx.outboxEvent.create({ data: { eventType: 'ANNOUNCEMENT_PUBLISHED', aggregateType: 'Announcement', aggregateId: id, payload: { announcementId: id, recipientCount: recipients.length } } }); return result; }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }); }
+  async publish(id: string, actorId: string, requestedRecipients?: string[]) {
+    return this.prisma.$transaction(async (tx) => {
+      const announcement = await tx.announcement.findUnique({ where: { id } });
+      if (!announcement) throw new NotFoundException('Announcement not found');
+      if (!([AnnouncementStatus.DRAFT, AnnouncementStatus.SCHEDULED] as AnnouncementStatus[]).includes(announcement.status)) throw new BadRequestException('Announcement cannot be published');
+      const recipients = await this.resolveRecipients(announcement.audience, requestedRecipients, tx);
+      if (!recipients.length) throw new BadRequestException('No eligible parent recipients');
+      await tx.announcementRecipient.createMany({ data: recipients.map((userId) => ({ announcementId: id, userId })), skipDuplicates: true });
+      if (announcement.sendInApp) {
+        const chunkSize = 100;
+        for (let i = 0; i < recipients.length; i += chunkSize) {
+          const chunk = recipients.slice(i, i + chunkSize);
+          await tx.notification.createMany({
+            data: chunk.map((userId) => ({
+              userId,
+              type: NotificationType.ANNOUNCEMENT,
+              title: announcement.title,
+              message: announcement.message,
+              relatedEntity: 'Announcement',
+              relatedEntityId: announcement.id,
+              dedupeKey: `announcement:${announcement.id}:${userId}`,
+            })),
+            skipDuplicates: true,
+          });
+        }
+      }
+      const result = await tx.announcement.update({ where: { id }, data: { status: AnnouncementStatus.PUBLISHED, publishedAt: new Date() } });
+      await tx.activityLog.create({ data: { userId: actorId, action: 'ANNOUNCEMENT_PUBLISHED', entity: 'Announcement', entityId: id, description: `Published announcement to ${recipients.length} parents` } });
+      await tx.outboxEvent.create({ data: { eventType: 'ANNOUNCEMENT_PUBLISHED', aggregateType: 'Announcement', aggregateId: id, payload: { announcementId: id, recipientCount: recipients.length } } });
+      return result;
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+  }
   async listForParent(userId: string) { return this.prisma.announcementRecipient.findMany({ where: { userId }, include: { announcement: true }, orderBy: { createdAt: 'desc' } }); }
   async markRead(id: string, userId: string) { const row = await this.prisma.announcementRecipient.findUnique({ where: { announcementId_userId: { announcementId: id, userId } } }); if (!row) throw new NotFoundException('Announcement not found'); return this.prisma.announcementRecipient.update({ where: { id: row.id }, data: { readAt: row.readAt ?? new Date() } }); }
   @Cron('*/5 * * * *') async publishScheduled(): Promise<void> { const due = await this.prisma.announcement.findMany({ where: { status: AnnouncementStatus.SCHEDULED, scheduledAt: { lte: new Date() } }, select: { id: true, createdByUserId: true } }); for (const item of due) { try { await this.publish(item.id, item.createdByUserId); } catch { /* Retry safely on the next scheduler pass. */ } } }

@@ -1,7 +1,7 @@
 import { Body, Controller, Get, Param, Post, Query } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiParam, ApiPropertyOptional, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { Role } from '@prisma/client';
-import { IsOptional, IsUUID, Max, Min } from 'class-validator';
+import { IsDateString, IsOptional, IsUUID, Max, Min } from 'class-validator';
 import { Type } from 'class-transformer';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { Roles } from '../../common/decorators/roles.decorator';
@@ -19,6 +19,16 @@ class TransactionQueryDto {
   @IsOptional()
   @IsUUID()
   childId?: string;
+
+  @ApiPropertyOptional({ description: 'Start date filter (ISO 8601)' })
+  @IsOptional()
+  @IsDateString()
+  from?: string;
+
+  @ApiPropertyOptional({ description: 'End date filter (ISO 8601)' })
+  @IsOptional()
+  @IsDateString()
+  to?: string;
 
   @ApiPropertyOptional({ description: 'Page number', default: 1 })
   @IsOptional()
@@ -54,7 +64,7 @@ export class FinanceController {
   @ApiOperation({ summary: 'List Payments', description: 'Lists all payments with optional filtering.' })
   @ApiResponse({ status: 200, description: 'Paginated list of payments.' })
   payments(@Query() query: FinanceQueryDto) {
-    return this.finance.payments(query.parentId, query.childId, query.page, query.limit);
+    return this.finance.payments(query.parentId, query.childId, query.page, query.limit, query.from, query.to);
   }
 
   @Roles(Role.SUPER_ADMIN, Role.ADMIN)
@@ -83,7 +93,7 @@ export class FinanceController {
   @ApiOperation({ summary: 'List Immutable Financial Ledger Transactions' })
   @ApiResponse({ status: 200, description: 'Paginated transactions list.' })
   transactions(@Query() query: TransactionQueryDto) {
-    return this.finance.transactions(query.parentId, query.childId, query.page, query.limit);
+    return this.finance.transactions(query.parentId, query.childId, query.page, query.limit, query.from, query.to);
   }
 
   @Roles(Role.SUPER_ADMIN, Role.ADMIN)

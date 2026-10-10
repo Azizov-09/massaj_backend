@@ -16,5 +16,16 @@ export class PlatformService {
   async document(id: string, user: RequestUser) { const doc = await this.prisma.document.findUnique({ where: { id } }); if (!doc) throw new NotFoundException('Document not found'); await this.access.assertChildAccess(user, doc.childId); return { id: doc.id, name: doc.name, fileKey: doc.fileKey, mimeType: doc.mimeType, size: doc.size, type: doc.type, createdAt: doc.createdAt }; }
   async getSettings() { const settings = await this.prisma.centerSettings.findFirst({ orderBy: { createdAt: 'asc' } }); return settings ?? { centerName: null, currency: 'UZS', timezone: 'Asia/Tashkent' }; }
   async updateSettings(dto: UpdateSettingsDto, userId: string) { const existing = await this.prisma.centerSettings.findFirst({ orderBy: { createdAt: 'asc' } }); const data = { ...dto, workingHours: dto.workingHours as Prisma.InputJsonValue | undefined, notificationSettings: dto.notificationSettings as Prisma.InputJsonValue | undefined }; const settings = existing ? await this.prisma.centerSettings.update({ where: { id: existing.id }, data }) : await this.prisma.centerSettings.create({ data: { centerName: dto.centerName ?? 'Rehabilitation Center', ...data } }); await this.prisma.activityLog.create({ data: { userId, action: 'SETTINGS_UPDATED', entity: 'CenterSettings', entityId: settings.id, description: 'Updated center settings' } }); return settings; }
-  activityLogs(page: number, limit: number) { return this.prisma.activityLog.findMany({ orderBy: { createdAt: 'desc' }, skip: (page - 1) * limit, take: limit, include: { user: { select: { fullName: true, role: true } } } }); }
+  async activityLogs(page: number, limit: number) {
+    const [items, total] = await this.prisma.$transaction([
+      this.prisma.activityLog.findMany({
+        orderBy: { createdAt: 'desc' },
+        skip: (page - 1) * limit,
+        take: limit,
+        include: { user: { select: { fullName: true, role: true } } },
+      }),
+      this.prisma.activityLog.count(),
+    ]);
+    return { items, meta: { page, limit, total, totalPages: Math.ceil(total / limit) } };
+  }
 }

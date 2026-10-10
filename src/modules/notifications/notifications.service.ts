@@ -1,5 +1,6 @@
 import { Injectable, NotFoundException, Optional } from '@nestjs/common';
 import {
+  Notification,
   NotificationChannel,
   NotificationDeliveryStatus,
   NotificationPriority,
@@ -39,7 +40,7 @@ export class NotificationsService {
   async create(
     input: CreateNotificationInput,
     tx: Prisma.TransactionClient = this.prisma,
-  ): Promise<void> {
+  ): Promise<Notification | undefined> {
     // Idempotency — skip if already created with same dedupeKey
     if (input.dedupeKey) {
       const existing = await tx.notification.findUnique({
@@ -62,8 +63,11 @@ export class NotificationsService {
       },
     });
 
-    // Broadcast in real-time over WebSocket to user's personal room
-    this.realtime?.emitToUser(input.userId, 'notification:new', notification);
+    // Only broadcast immediately if NOT running inside an external transaction.
+    // If inside a transaction, callers invoke emitRealtimeNotification post-commit to prevent rollback leaks.
+    if (tx === this.prisma) {
+      this.realtime?.emitToUser(input.userId, 'notification:new', notification);
+    }
 
     // Queue SMS delivery if allowed and preference permits
     if (input.allowSms && (await this.allowsSms(input.userId, input.type, tx))) {
@@ -83,6 +87,12 @@ export class NotificationsService {
         },
       });
     }
+
+    return notification;
+  }
+
+  emitRealtimeNotification(userId: string, notification: unknown): void {
+    this.realtime?.emitToUser(userId, 'notification:new', notification);
   }
 
   async listForUser(userId: string, page: number, limit: number) {
