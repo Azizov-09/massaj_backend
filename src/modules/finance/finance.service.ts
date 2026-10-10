@@ -54,6 +54,7 @@ export class FinanceService {
           data: {
             parentId: dto.parentId,
             childId: dto.childId,
+            paymentId: payment.id,
             type: TransactionType.PAYMENT,
             direction: TransactionDirection.IN,
             amount: dto.amount,
@@ -114,11 +115,14 @@ export class FinanceService {
         });
         if (!payment) throw new NotFoundException('Payment not found');
 
-        // Check cumulative refunds don't exceed original amount
+        // Check cumulative refunds don't exceed original amount (linked by paymentId with fallback)
         const aggregate = await tx.transaction.aggregate({
           where: {
             type: TransactionType.REFUND,
-            description: { startsWith: `Refund for payment ${payment.id}` },
+            OR: [
+              { paymentId: payment.id },
+              { description: { startsWith: `Refund for payment ${payment.id}` } },
+            ],
           },
           _sum: { amount: true },
         });
@@ -131,6 +135,7 @@ export class FinanceService {
           data: {
             parentId: payment.parentId,
             childId: payment.childId,
+            paymentId: payment.id,
             type: TransactionType.REFUND,
             direction: TransactionDirection.OUT,
             amount: dto.amount,

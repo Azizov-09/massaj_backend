@@ -52,7 +52,7 @@ export class ChildrenService {
       where.AND = [specialistFilter];
     }
     const [items, total] = await this.prisma.$transaction([this.prisma.child.findMany({ where, skip: (query.page - 1) * query.limit, take: query.limit, orderBy: { createdAt: 'desc' }, include: { parents: { include: { parent: { include: { user: { select: { fullName: true, phone: true } } } } } } } }), this.prisma.child.count({ where })]);
-    return { items, meta: { page: query.page, limit: query.limit, total } };
+    return { items, meta: { page: query.page, limit: query.limit, total, totalPages: Math.ceil(total / query.limit) } };
   }
   async get(id: string, user: RequestUser) { await this.access.assertChildAccess(user, id); const child = await this.prisma.child.findUnique({ where: { id }, include: { parents: { include: { parent: { include: { user: { select: { id: true, fullName: true, phone: true } } } } } } } }); if (!child) throw new NotFoundException('Child not found'); return child; }
   async update(id: string, dto: UpdateChildDto, actorId: string) { await this.requireChild(id); const item = await this.prisma.child.update({ where: { id }, data: { ...dto, birthDate: dto.birthDate ? new Date(dto.birthDate) : undefined } }); await this.log(actorId, 'CHILD_UPDATED', id, 'Updated child profile'); return item; }

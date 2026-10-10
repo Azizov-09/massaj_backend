@@ -315,6 +315,7 @@ model Payment {
   paidAt    DateTime
   parent    Parent        @relation(fields: [parentId], references: [id])
   child     Child         @relation(fields: [childId], references: [id])
+  transactions Transaction[]
   createdAt DateTime      @default(now())
   @@index([parentId])
   @@index([childId])
@@ -325,6 +326,7 @@ model Transaction {
   id             String               @id @default(uuid()) @db.Uuid
   parentId       String?              @db.Uuid
   childId        String?              @db.Uuid
+  paymentId      String?              @db.Uuid
   type           TransactionType
   direction      TransactionDirection
   amount         Int
@@ -332,9 +334,11 @@ model Transaction {
   idempotencyKey String?              @unique @db.VarChar(255)
   parent         Parent?              @relation(fields: [parentId], references: [id])
   child          Child?               @relation(fields: [childId], references: [id])
+  payment        Payment?             @relation(fields: [paymentId], references: [id])
   createdAt      DateTime             @default(now())
   @@index([parentId])
   @@index([childId])
+  @@index([paymentId])
   @@index([type])
   @@index([direction])
   @@index([createdAt])

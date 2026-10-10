@@ -119,6 +119,7 @@ describe('FinanceService Unit Tests', () => {
         data: expect.objectContaining({
           parentId: 'p1',
           childId: 'c1',
+          paymentId: 'new-pay-id',
           type: TransactionType.PAYMENT,
           direction: TransactionDirection.IN,
           amount: 500_000,
@@ -161,6 +162,7 @@ describe('FinanceService Unit Tests', () => {
       const refundTx = {
         id: 'refund-tx-1',
         parentId: 'p1',
+        paymentId: 'pay-1',
         type: TransactionType.REFUND,
         direction: TransactionDirection.OUT,
         amount: 50_000,
@@ -171,10 +173,39 @@ describe('FinanceService Unit Tests', () => {
       expect(res).toEqual(refundTx);
       expect(mockPrisma.transaction.create).toHaveBeenCalledWith({
         data: expect.objectContaining({
+          paymentId: 'pay-1',
           type: TransactionType.REFUND,
           direction: TransactionDirection.OUT,
           amount: 50_000,
         }),
+      });
+    });
+  });
+
+  describe('allDebtors (PostgreSQL Database Aggregation)', () => {
+    it('computes debtors using database groupBy aggregation', async () => {
+      mockPrisma.transaction.groupBy = jest.fn().mockResolvedValue([
+        { parentId: 'p-1', direction: TransactionDirection.IN, _sum: { amount: 100_000 } },
+        { parentId: 'p-1', direction: TransactionDirection.OUT, _sum: { amount: 250_000 } },
+        { parentId: 'p-2', direction: TransactionDirection.IN, _sum: { amount: 500_000 } },
+        { parentId: 'p-2', direction: TransactionDirection.OUT, _sum: { amount: 100_000 } },
+      ]);
+      mockPrisma.parent.findMany = jest.fn().mockResolvedValue([
+        { id: 'p-1', user: { fullName: 'Ali Valiyev', phone: '+998901234567' } },
+      ]);
+
+      const debtors = await service.allDebtors();
+      expect(mockPrisma.transaction.groupBy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          by: ['parentId', 'direction'],
+          _sum: { amount: true },
+        }),
+      );
+      expect(debtors).toHaveLength(1);
+      expect(debtors[0]).toEqual({
+        parentId: 'p-1',
+        debt: 150_000,
+        parent: { id: 'p-1', user: { fullName: 'Ali Valiyev', phone: '+998901234567' } },
       });
     });
   });

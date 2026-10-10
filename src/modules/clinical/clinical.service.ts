@@ -48,13 +48,35 @@ export class ClinicalService {
     });
   }
   async assessments(childId: string, user: RequestUser) { await this.access.assertChildAccess(user, childId); return this.prisma.assessment.findMany({ where: { childId }, include: { specialist: { include: { user: { select: { fullName: true } } } } }, orderBy: { createdAt: 'desc' } }); }
-  async createAssessment(dto: CreateAssessmentDto, user: RequestUser) { const specialistId = await this.resolveSpecialist(dto.specialistId, user); await this.access.assertChildAccess({ ...user, role: Role.SPECIALIST, id: (await this.prisma.specialist.findUniqueOrThrow({ where: { id: specialistId }, select: { userId: true } })).userId }, dto.childId); return this.prisma.$transaction(async (tx) => { const row = await tx.assessment.create({ data: { ...dto, specialistId } }); await this.notifyParents(dto.childId, 'ASSESSMENT', 'New assessment available', 'A specialist added an assessment update.', row.id, tx); return row; }); }
+  async createAssessment(dto: CreateAssessmentDto, user: RequestUser) {
+    await this.access.assertChildAccess(user, dto.childId);
+    const specialistId = await this.resolveSpecialist(dto.specialistId, user);
+    return this.prisma.$transaction(async (tx) => {
+      const row = await tx.assessment.create({ data: { ...dto, specialistId } });
+      await this.notifyParents(dto.childId, 'ASSESSMENT', 'New assessment available', 'A specialist added an assessment update.', row.id, tx);
+      return row;
+    });
+  }
   async updateAssessment(id: string, dto: UpdateAssessmentDto, user: RequestUser) { const row = await this.prisma.assessment.findUnique({ where: { id } }); if (!row) throw new NotFoundException('Assessment not found'); await this.assertSpecialistOwner(row.specialistId, user); return this.prisma.assessment.update({ where: { id }, data: dto }); }
   async progress(childId: string, user: RequestUser) { await this.access.assertChildAccess(user, childId); return this.prisma.progressEntry.findMany({ where: { childId }, include: { specialist: { include: { user: { select: { fullName: true } } } } }, orderBy: { createdAt: 'desc' } }); }
-  async createProgress(dto: CreateProgressDto, user: RequestUser) { const specialistId = await this.resolveSpecialist(dto.specialistId, user); await this.assertSpecialistChild(specialistId, dto.childId); return this.prisma.$transaction(async (tx) => { const row = await tx.progressEntry.create({ data: { ...dto, specialistId } }); await this.notifyParents(dto.childId, 'PROGRESS', 'New progress update', 'A specialist added a progress update.', row.id, tx); return row; }); }
+  async createProgress(dto: CreateProgressDto, user: RequestUser) {
+    await this.access.assertChildAccess(user, dto.childId);
+    const specialistId = await this.resolveSpecialist(dto.specialistId, user);
+    await this.assertSpecialistChild(specialistId, dto.childId);
+    return this.prisma.$transaction(async (tx) => {
+      const row = await tx.progressEntry.create({ data: { ...dto, specialistId } });
+      await this.notifyParents(dto.childId, 'PROGRESS', 'New progress update', 'A specialist added a progress update.', row.id, tx);
+      return row;
+    });
+  }
   async updateProgress(id: string, dto: UpdateProgressDto, user: RequestUser) { const row = await this.prisma.progressEntry.findUnique({ where: { id } }); if (!row) throw new NotFoundException('Progress entry not found'); await this.assertSpecialistOwner(row.specialistId, user); return this.prisma.progressEntry.update({ where: { id }, data: dto }); }
   async goals(childId: string, user: RequestUser) { await this.access.assertChildAccess(user, childId); return this.prisma.goal.findMany({ where: { childId }, include: { specialist: { include: { user: { select: { fullName: true } } } } }, orderBy: { createdAt: 'desc' } }); }
-  async createGoal(dto: CreateGoalDto, user: RequestUser) { const specialistId = await this.resolveSpecialist(dto.specialistId, user); await this.assertSpecialistChild(specialistId, dto.childId); return this.prisma.goal.create({ data: { ...dto, specialistId, targetDate: dto.targetDate ? new Date(dto.targetDate) : undefined } }); }
+  async createGoal(dto: CreateGoalDto, user: RequestUser) {
+    await this.access.assertChildAccess(user, dto.childId);
+    const specialistId = await this.resolveSpecialist(dto.specialistId, user);
+    await this.assertSpecialistChild(specialistId, dto.childId);
+    return this.prisma.goal.create({ data: { ...dto, specialistId, targetDate: dto.targetDate ? new Date(dto.targetDate) : undefined } });
+  }
   async updateGoal(id: string, dto: UpdateGoalDto, user: RequestUser) { const row = await this.prisma.goal.findUnique({ where: { id } }); if (!row) throw new NotFoundException('Goal not found'); await this.assertSpecialistOwner(row.specialistId, user); return this.prisma.goal.update({ where: { id }, data: { ...dto, targetDate: dto.targetDate ? new Date(dto.targetDate) : undefined } }); }
   async completeGoal(id: string, user: RequestUser) { return this.updateGoal(id, { status: GoalStatus.COMPLETED, progress: 100 }, user); }
   async pauseGoal(id: string, user: RequestUser) { return this.updateGoal(id, { status: GoalStatus.PAUSED }, user); }
