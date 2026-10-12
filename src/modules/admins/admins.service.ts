@@ -130,7 +130,7 @@ export class AdminsService {
   }
 
   async update(id: string, dto: UpdateAdminDto, actorId: string) {
-    const existing = await this.findOne(id);
+    await this.findOne(id);
 
     let phone: string | undefined;
     if (dto.phone) {
@@ -181,8 +181,8 @@ export class AdminsService {
 
       await this.log(actorId, 'ADMIN_UPDATED', 'User', id, `Updated admin profile: ${updated.fullName} (${updated.role})`);
       return updated;
-    } catch (err: any) {
-      if (err?.code === 'P2002') {
+    } catch (err: unknown) {
+      if (typeof err === 'object' && err !== null && 'code' in err && err.code === 'P2002') {
         throw new ConflictException('Phone number or email already in use');
       }
       throw err;
