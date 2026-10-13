@@ -189,7 +189,7 @@ describe('ClinicalService — security & access control', () => {
       );
 
       await expect(
-        service.createGoal({ childId: 'victim-child', description: 'D', specialistId: undefined }, attacker),
+        service.createGoal({ childId: 'victim-child', title: 'Test Goal', description: 'D', specialistId: undefined }, attacker),
       ).rejects.toThrow(ForbiddenException);
 
       expect(mockPrisma.goal.create).not.toHaveBeenCalled();

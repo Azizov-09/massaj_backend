@@ -7,6 +7,7 @@ import cookieParser from 'cookie-parser';
 import { AppModule } from './app/app.module';
 import { PrismaService } from './database/prisma.service';
 import { seedDatabase } from './database/seed';
+import { seedSuperAdmin } from './database/super-admin.seed';
 
 async function bootstrap(): Promise<void> {
   const logger = new Logger('Bootstrap');
@@ -119,6 +120,13 @@ async function bootstrap(): Promise<void> {
 
   const prisma = app.get(PrismaService);
   prisma.enableShutdownHooks(app);
+
+  // Ensure Super Admin exists using credentials from .env
+  try {
+    await seedSuperAdmin(prisma);
+  } catch (err) {
+    logger.error('[SuperAdminSeed] Error during initial super admin seed check:', err);
+  }
 
   // Auto-seed mock data on startup only in non-production environments if explicitly requested or empty db
   const isProd = process.env.NODE_ENV === 'production';
