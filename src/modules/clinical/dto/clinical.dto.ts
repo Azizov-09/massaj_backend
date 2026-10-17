@@ -1,7 +1,7 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { AttendanceStatus, GoalStatus } from '@prisma/client';
+import { AttendanceStatus } from '@prisma/client';
 import { Type } from 'class-transformer';
-import { IsDateString, IsEnum, IsInt, IsOptional, IsString, IsUUID, Length, Max, Min } from 'class-validator';
+import { IsDateString, IsEnum, IsInt, IsOptional, IsString, IsUUID, Length, Max, MaxLength, Min } from 'class-validator';
 
 export class CreateAttendanceDto {
   @ApiProperty({ description: 'Target child UUID' })
@@ -54,68 +54,73 @@ export class CreateAssessmentDto {
   @ApiPropertyOptional({ description: 'Movement / motor evaluation notes' })
   @IsOptional()
   @IsString()
-  @Max(3000)
+  @MaxLength(3000)
   movement?: string;
 
   @ApiPropertyOptional({ description: 'Coordination evaluation notes' })
   @IsOptional()
   @IsString()
-  @Max(3000)
+  @MaxLength(3000)
   coordination?: string;
 
   @ApiPropertyOptional({ description: 'Flexibility / joint range of motion' })
   @IsOptional()
   @IsString()
-  @Max(3000)
+  @MaxLength(3000)
   flexibility?: string;
 
   @ApiPropertyOptional({ description: 'Physical tolerance during session' })
   @IsOptional()
   @IsString()
-  @Max(3000)
+  @MaxLength(3000)
   activityTolerance?: string;
 
   @ApiPropertyOptional({ description: 'Child behavioral response to session' })
   @IsOptional()
   @IsString()
-  @Max(3000)
+  @MaxLength(3000)
   sessionResponse?: string;
 
   @ApiProperty({ description: 'Comprehensive professional clinical observation' })
   @IsString()
   @Length(1, 5000)
   professionalObservation!: string;
+
+  @ApiPropertyOptional({ description: 'When the assessment was performed (ISO 8601); cannot be in the future' })
+  @IsOptional()
+  @IsDateString()
+  assessedAt?: string;
 }
 
 export class UpdateAssessmentDto {
   @ApiPropertyOptional({ description: 'Movement / motor evaluation notes' })
   @IsOptional()
   @IsString()
-  @Max(3000)
+  @MaxLength(3000)
   movement?: string;
 
   @ApiPropertyOptional({ description: 'Coordination evaluation notes' })
   @IsOptional()
   @IsString()
-  @Max(3000)
+  @MaxLength(3000)
   coordination?: string;
 
   @ApiPropertyOptional({ description: 'Flexibility / joint range of motion' })
   @IsOptional()
   @IsString()
-  @Max(3000)
+  @MaxLength(3000)
   flexibility?: string;
 
   @ApiPropertyOptional({ description: 'Physical tolerance during session' })
   @IsOptional()
   @IsString()
-  @Max(3000)
+  @MaxLength(3000)
   activityTolerance?: string;
 
   @ApiPropertyOptional({ description: 'Child behavioral response to session' })
   @IsOptional()
   @IsString()
-  @Max(3000)
+  @MaxLength(3000)
   sessionResponse?: string;
 
   @ApiPropertyOptional({ description: 'Comprehensive professional clinical observation' })
@@ -144,6 +149,11 @@ export class CreateProgressDto {
   @IsString()
   @Length(1, 5000)
   description!: string;
+
+  @ApiPropertyOptional({ description: 'When the clinical progress occurred (ISO 8601); cannot be in the future' })
+  @IsOptional()
+  @IsDateString()
+  occurredAt?: string;
 }
 
 export class UpdateProgressDto {
@@ -158,71 +168,46 @@ export class UpdateProgressDto {
   @IsString()
   @Length(1, 5000)
   description?: string;
+
+  @ApiPropertyOptional({ description: 'When the clinical progress occurred (ISO 8601); cannot be in the future' })
+  @IsOptional()
+  @IsDateString()
+  occurredAt?: string;
 }
 
-export class CreateGoalDto {
-  @ApiProperty({ description: 'Target child UUID' })
+export class ClinicalListQueryDto {
+  @ApiPropertyOptional({ description: 'Filter by child UUID' })
+  @IsOptional()
   @IsUUID()
-  childId!: string;
+  childId?: string;
 
-  @ApiPropertyOptional({ description: 'Assigned specialist UUID' })
+  @ApiPropertyOptional({ description: 'Filter by specialist UUID' })
   @IsOptional()
   @IsUUID()
   specialistId?: string;
 
-  @ApiProperty({ description: 'Therapeutic goal title' })
-  @IsString()
-  @Length(1, 200)
-  title!: string;
-
-  @ApiPropertyOptional({ description: 'Goal milestones and criteria' })
-  @IsOptional()
-  @IsString()
-  @Max(5000)
-  description?: string;
-
-  @ApiPropertyOptional({ description: 'Target completion date (YYYY-MM-DD)' })
+  @ApiPropertyOptional({ description: 'Start of clinical date range (ISO 8601)' })
   @IsOptional()
   @IsDateString()
-  targetDate?: string;
+  from?: string;
 
-  @ApiPropertyOptional({ description: 'Percentage completed (0-100)', default: 0 })
+  @ApiPropertyOptional({ description: 'End of clinical date range (ISO 8601)' })
+  @IsOptional()
+  @IsDateString()
+  to?: string;
+
+  @ApiPropertyOptional({ default: 1 })
   @IsOptional()
   @Type(() => Number)
   @IsInt()
-  @Min(0)
-  @Max(100)
-  progress?: number;
-}
+  @Min(1)
+  page = 1;
 
-export class UpdateGoalDto {
-  @ApiPropertyOptional({ description: 'Therapeutic goal title' })
-  @IsOptional()
-  @IsString()
-  @Length(1, 200)
-  title?: string;
-
-  @ApiPropertyOptional({ description: 'Goal milestones and criteria' })
-  @IsOptional()
-  @IsString()
-  @Max(5000)
-  description?: string;
-
-  @ApiPropertyOptional({ description: 'Target completion date (YYYY-MM-DD)' })
-  @IsOptional()
-  @IsDateString()
-  targetDate?: string;
-
-  @ApiPropertyOptional({ description: 'Percentage completed (0-100)' })
+  @ApiPropertyOptional({ default: 50, maximum: 100 })
   @IsOptional()
   @Type(() => Number)
   @IsInt()
-  @Min(0)
+  @Min(1)
   @Max(100)
-  progress?: number;
-
-  @ApiPropertyOptional({ enum: GoalStatus, description: 'Goal status' })
-  @IsOptional()
-  @IsEnum(GoalStatus)
-  status?: GoalStatus;
+  limit = 50;
 }

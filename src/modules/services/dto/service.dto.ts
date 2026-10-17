@@ -22,7 +22,7 @@ export class CreateServiceDto {
   @Max(480)
   durationMinutes!: number;
 
-  @ApiProperty({ description: 'Price in smallest currency unit (e.g. tiyin)' })
+  @ApiProperty({ description: 'Positive whole price in UZS; do not multiply by 100' })
   @Type(() => Number)
   @IsInt()
   @Min(0)
@@ -51,7 +51,7 @@ export class UpdateServiceDto {
   @Max(480)
   durationMinutes?: number;
 
-  @ApiPropertyOptional({ description: 'Price in smallest currency unit' })
+  @ApiPropertyOptional({ description: 'Positive whole price in UZS; do not multiply by 100' })
   @IsOptional()
   @Type(() => Number)
   @IsInt()

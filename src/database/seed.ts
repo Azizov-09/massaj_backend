@@ -6,7 +6,6 @@ import {
   EmployeeStatus,
   ServiceStatus,
   AttendanceStatus,
-  GoalStatus,
   PaymentMethod,
   TransactionType,
   TransactionDirection,
@@ -541,7 +540,8 @@ export async function seedDatabase(prisma: PrismaClient, force = false): Promise
         });
 
         const partialPayment = 100000;
-        await prisma.payment.create({
+        const paymentKey = `seed-payment:${parent.id}:partial`;
+        const payment = await prisma.payment.create({
           data: {
             parentId: parent.id,
             childId: child.id,
@@ -549,16 +549,19 @@ export async function seedDatabase(prisma: PrismaClient, force = false): Promise
             method: methods[i % methods.length] ?? PaymentMethod.CASH,
             note: 'Qisman to\'lov (Qarzdorlik qolgan)',
             paidAt: new Date(Date.now() - 3 * 86400000),
+            idempotencyKey: paymentKey,
           },
         });
         await prisma.transaction.create({
           data: {
             parentId: parent.id,
             childId: child.id,
+            paymentId: payment.id,
             type: TransactionType.PAYMENT,
             direction: TransactionDirection.IN,
             amount: partialPayment,
             description: 'Kassaga qisman kiritilgan to\'lov',
+            idempotencyKey: `payment:${paymentKey}`,
           },
         });
       } else if (groupType === 1) {
@@ -574,7 +577,8 @@ export async function seedDatabase(prisma: PrismaClient, force = false): Promise
             description: 'Massaj kursi uchun to\'lov talabi',
           },
         });
-        await prisma.payment.create({
+        const paymentKey = `seed-payment:${parent.id}:exact`;
+        const payment = await prisma.payment.create({
           data: {
             parentId: parent.id,
             childId: child.id,
@@ -582,22 +586,26 @@ export async function seedDatabase(prisma: PrismaClient, force = false): Promise
             method: methods[i % methods.length] ?? PaymentMethod.CARD,
             note: 'To\'liq to\'langan seans to\'lovi',
             paidAt: new Date(Date.now() - 5 * 86400000),
+            idempotencyKey: paymentKey,
           },
         });
         await prisma.transaction.create({
           data: {
             parentId: parent.id,
             childId: child.id,
+            paymentId: payment.id,
             type: TransactionType.PAYMENT,
             direction: TransactionDirection.IN,
             amount,
             description: 'Kassaga kiritilgan to\'liq to\'lov',
+            idempotencyKey: `payment:${paymentKey}`,
           },
         });
       } else {
         // ADVANCE BALANCE: Deposit 800,000 UZS
         const advanceAmount = 800000;
-        await prisma.payment.create({
+        const paymentKey = `seed-payment:${parent.id}:advance`;
+        const payment = await prisma.payment.create({
           data: {
             parentId: parent.id,
             childId: child.id,
@@ -605,24 +613,27 @@ export async function seedDatabase(prisma: PrismaClient, force = false): Promise
             method: PaymentMethod.CARD,
             note: 'Karta orqali oldindan o\'tkazilgan depozit',
             paidAt: new Date(Date.now() - 2 * 86400000),
+            idempotencyKey: paymentKey,
           },
         });
         await prisma.transaction.create({
           data: {
             parentId: parent.id,
             childId: child.id,
+            paymentId: payment.id,
             type: TransactionType.PAYMENT,
             direction: TransactionDirection.IN,
             amount: advanceAmount,
             description: 'Oldindan kiritilgan depozit mablag\'i',
+            idempotencyKey: `payment:${paymentKey}`,
           },
         });
       }
     }
   }
 
-  // 10. Clinical Records: Assessments, Goals, Progress Entries
-  console.log('[Seed] 10/12 Seeding Clinical Assessments, Goals, and Progress...');
+  // 10. Clinical Records: Assessments and Progress Entries
+  console.log('[Seed] 10/12 Seeding Clinical Assessments and Progress...');
   const assessmentCount = await prisma.assessment.count();
   if (assessmentCount < 30 && childRecords.length > 0 && specialistRecords.length > 0) {
     for (let i = 0; i < Math.min(35, childRecords.length); i++) {
@@ -639,18 +650,6 @@ export async function seedDatabase(prisma: PrismaClient, force = false): Promise
           activityTolerance: '30 daqiqalik mashg\'ulotni toliq qabul qila oladi.',
           sessionResponse: 'Mashg\'ulot oxirida ijobiy hissiyotlar va bo\'shashish kuzatildi.',
           professionalObservation: 'Terapevtik massaj kursi yaxshi samara bermoqda, tonus me\'yoriga tushmoqda.',
-        },
-      });
-
-      await prisma.goal.create({
-        data: {
-          childId: child.id,
-          specialistId: specialist.id,
-          title: 'Bo\'yin harakati amplitudasini 80% ga yetkazish',
-          description: 'Bo\'yin qiyshiqligini bartaraf etish va boshni markaziy holatda ushlashni mustahkamlash.',
-          targetDate: new Date(Date.now() + 45 * 86400000),
-          status: GoalStatus.ACTIVE,
-          progress: 30 + ((i * 7) % 65),
         },
       });
 

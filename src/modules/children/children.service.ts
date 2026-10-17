@@ -45,7 +45,6 @@ export class ChildrenService {
         OR: [
           { attendances: { some: { specialist: { userId: user.id } } } },
           { assessments: { some: { specialist: { userId: user.id } } } },
-          { goals: { some: { specialist: { userId: user.id } } } },
           { progressEntries: { some: { specialist: { userId: user.id } } } },
         ],
       };

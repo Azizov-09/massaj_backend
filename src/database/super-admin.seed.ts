@@ -10,10 +10,15 @@ import { normalizeUzbekPhone } from '../common/utils/phone.util';
 export async function seedSuperAdmin(prisma: PrismaClient): Promise<void> {
   const logger = new Logger('SuperAdminSeed');
 
-  const rawPhone = process.env.SUPER_ADMIN_PHONE ?? '+998901000001';
-  const password = process.env.SUPER_ADMIN_PASSWORD ?? 'Admin123!';
-  const fullName = process.env.SUPER_ADMIN_FULL_NAME ?? 'Bosh Administrator (Super)';
-  const email = process.env.SUPER_ADMIN_EMAIL ?? 'admin@massaj.uz';
+  const rawPhone = process.env.SUPER_ADMIN_PHONE;
+  const password = process.env.SUPER_ADMIN_PASSWORD;
+  const fullName = process.env.SUPER_ADMIN_FULL_NAME;
+  const email = process.env.SUPER_ADMIN_EMAIL;
+
+  if (!rawPhone || !password || !fullName) {
+    logger.log('Super Admin bootstrap credentials are not configured; automatic bootstrap skipped.');
+    return;
+  }
 
   let phone: string;
   try {
@@ -30,9 +35,8 @@ export async function seedSuperAdmin(prisma: PrismaClient): Promise<void> {
     include: { admin: true },
   });
 
-  const passwordHash = await argon2.hash(password, { type: argon2.argon2id });
-
   if (!existingUser) {
+    const passwordHash = await argon2.hash(password, { type: argon2.argon2id });
     logger.log(`Creating initial Super Admin with phone: ${phone}...`);
     await prisma.user.create({
       data: {
@@ -48,30 +52,9 @@ export async function seedSuperAdmin(prisma: PrismaClient): Promise<void> {
       },
     });
     logger.log(`Initial Super Admin created successfully (${phone})`);
+  } else if (existingUser.role !== Role.SUPER_ADMIN || !existingUser.admin) {
+    throw new Error('Configured SUPER_ADMIN_PHONE belongs to an account that is not a complete SUPER_ADMIN profile');
   } else {
-    logger.log(
-      `Super Admin already exists (${phone}). Ensuring credentials & SUPER_ADMIN role...`,
-    );
-    await prisma.user.update({
-      where: { id: existingUser.id },
-      data: {
-        fullName,
-        email,
-        role: Role.SUPER_ADMIN,
-        status: UserStatus.ACTIVE,
-        passwordHash,
-        failedLoginCount: 0,
-        lockedUntil: null,
-      },
-    });
-
-    if (!existingUser.admin) {
-      await prisma.admin.create({
-        data: {
-          userId: existingUser.id,
-        },
-      });
-    }
-    logger.log(`Super Admin verified & updated successfully (${phone})`);
+    logger.log(`Super Admin already exists (${phone}); credentials were left unchanged.`);
   }
 }

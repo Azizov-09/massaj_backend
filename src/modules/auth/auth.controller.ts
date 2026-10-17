@@ -1,4 +1,4 @@
-import { Body, Controller, HttpCode, Post, Req, Res } from '@nestjs/common';
+import { Body, Controller, ForbiddenException, HttpCode, Post, Req, Res, UnauthorizedException } from '@nestjs/common';
 import {
   ApiBearerAuth,
   ApiBody,
@@ -22,7 +22,12 @@ export class AuthController {
   @Public()
   @Post('login')
   @HttpCode(200)
-  @Throttle({ default: { limit: 5, ttl: 60_000 } })
+  @Throttle({
+    default: {
+      limit: Number(process.env.LOGIN_THROTTLE_LIMIT ?? 5),
+      ttl: Number(process.env.LOGIN_THROTTLE_TTL ?? 60_000),
+    },
+  })
   @ApiOperation({
     summary: 'User Login',
     description:
@@ -38,7 +43,6 @@ export class AuthController {
     this.setRefreshCookie(response, result.tokens.refreshToken);
     return {
       accessToken: result.tokens.accessToken,
-      refreshToken: result.tokens.refreshToken,
       user: result.user,
     };
   }
@@ -54,12 +58,11 @@ export class AuthController {
   @ApiResponse({ status: 200, description: 'Token refreshed successfully.' })
   @ApiResponse({ status: 401, description: 'Invalid, expired, or revoked refresh token.' })
   async refresh(@Body() dto: RefreshDto, @Req() request: Request, @Res({ passthrough: true }) response: Response) {
-    const tokens = await this.auth.refresh(dto.refreshToken, request.headers['user-agent'], request.ip);
+    this.assertTrustedOrigin(request);
+    const refreshToken = this.getRefreshToken(dto, request);
+    const tokens = await this.auth.refresh(refreshToken, request.headers['user-agent'], request.ip);
     this.setRefreshCookie(response, tokens.refreshToken);
-    return {
-      accessToken: tokens.accessToken,
-      refreshToken: tokens.refreshToken,
-    };
+    return { accessToken: tokens.accessToken };
   }
 
   @ApiBearerAuth()
@@ -72,9 +75,10 @@ export class AuthController {
   @ApiBody({ type: RefreshDto })
   @ApiResponse({ status: 204, description: 'Logged out successfully.' })
   @ApiResponse({ status: 401, description: 'Unauthorized.' })
-  async logout(@Body() dto: RefreshDto, @Res({ passthrough: true }) response: Response): Promise<void> {
-    await this.auth.logout(dto.refreshToken);
-    response.clearCookie('refresh_token');
+  async logout(@Body() dto: RefreshDto, @Req() request: Request, @Res({ passthrough: true }) response: Response): Promise<void> {
+    this.assertTrustedOrigin(request);
+    await this.auth.logout(this.getRefreshToken(dto, request));
+    this.clearRefreshCookie(response);
   }
 
   @ApiBearerAuth()
@@ -88,7 +92,7 @@ export class AuthController {
   @ApiResponse({ status: 401, description: 'Unauthorized.' })
   async logoutAll(@CurrentUser() user: RequestUser, @Res({ passthrough: true }) response: Response): Promise<void> {
     await this.auth.logoutAll(user.id);
-    response.clearCookie('refresh_token');
+    this.clearRefreshCookie(response);
   }
 
   @ApiBearerAuth()
@@ -116,6 +120,35 @@ export class AuthController {
       secure: isSecure,
       maxAge: 30 * 24 * 60 * 60 * 1000,
       path: '/api/v1/auth',
+      ...(process.env.COOKIE_DOMAIN ? { domain: process.env.COOKIE_DOMAIN } : {}),
     });
+  }
+
+  private clearRefreshCookie(response: Response): void {
+    const isSecure = process.env.COOKIE_SECURE === 'true';
+    response.clearCookie('refresh_token', {
+      httpOnly: true,
+      sameSite: isSecure ? 'none' : 'lax',
+      secure: isSecure,
+      path: '/api/v1/auth',
+      ...(process.env.COOKIE_DOMAIN ? { domain: process.env.COOKIE_DOMAIN } : {}),
+    });
+  }
+
+  private getRefreshToken(dto: RefreshDto, request: Request): string {
+    const cookies = request.cookies as Record<string, unknown> | undefined;
+    const cookieToken = cookies?.refresh_token;
+    const token = typeof cookieToken === 'string' ? cookieToken : dto.refreshToken;
+    if (!token) throw new UnauthorizedException('Refresh token is required');
+    return token;
+  }
+
+  private assertTrustedOrigin(request: Request): void {
+    const origin = request.headers.origin;
+    if (!origin) return;
+    const trusted = new Set<string>(['https://massaj-frontent.vercel.app']);
+    if (process.env.FRONTEND_URL) trusted.add(process.env.FRONTEND_URL);
+    if (process.env.NODE_ENV !== 'production') trusted.add('http://localhost:5173').add('http://localhost:3000');
+    if (!trusted.has(origin)) throw new ForbiddenException('Untrusted request origin');
   }
 }

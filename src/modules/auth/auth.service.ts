@@ -44,10 +44,7 @@ export class AuthService {
     const session = await this.prisma.userSession.findUnique({ where: { id: payload.sid }, include: { user: true } });
     if (!session || session.userId !== payload.sub || session.expiresAt <= new Date()) throw new UnauthorizedException('Invalid refresh token');
     if (session.revokedAt) {
-      await this.prisma.$transaction([
-        this.prisma.user.update({ where: { id: payload.sub }, data: { tokenVersion: { increment: 1 } } }),
-        this.prisma.userSession.updateMany({ where: { userId: payload.sub, revokedAt: null }, data: { revokedAt: new Date() } }),
-      ]);
+      await this.revokeSessionsForReuse(payload.sub);
       throw new UnauthorizedException('Refresh token reuse detected; all sessions revoked');
     }
     if (
@@ -57,7 +54,14 @@ export class AuthService {
     ) {
       throw new UnauthorizedException('Invalid refresh token');
     }
-    await this.prisma.userSession.update({ where: { id: session.id }, data: { revokedAt: new Date() } });
+    const claimed = await this.prisma.userSession.updateMany({
+      where: { id: session.id, userId: payload.sub, revokedAt: null, expiresAt: { gt: new Date() } },
+      data: { revokedAt: new Date() },
+    });
+    if (claimed.count !== 1) {
+      await this.revokeSessionsForReuse(payload.sub);
+      throw new UnauthorizedException('Refresh token reuse detected; all sessions revoked');
+    }
     return this.issueSessionTokens(session.user, device, ip);
   }
 
@@ -106,8 +110,29 @@ export class AuthService {
     const refreshToken = await this.jwt.signAsync({ sub: user.id, sid: provisional.id, tv: user.tokenVersion }, { secret: this.config.getOrThrow('jwt.refreshSecret', { infer: true }), expiresIn: expiresIn as JwtSignOptions['expiresIn'] });
     await this.prisma.userSession.update({ where: { id: provisional.id }, data: { refreshTokenHash: this.hashRefreshToken(refreshToken) } });
     const accessExpiresIn = this.config.getOrThrow('jwt.accessExpiresIn', { infer: true });
-    const accessToken = await this.jwt.signAsync({ sub: user.id, role: user.role, tv: user.tokenVersion }, { secret: this.config.getOrThrow('jwt.accessSecret', { infer: true }), expiresIn: accessExpiresIn as JwtSignOptions['expiresIn'] });
+    const accessToken = await this.jwt.signAsync(
+      { sub: user.id, sid: provisional.id, role: user.role, tv: user.tokenVersion },
+      {
+        secret: this.config.getOrThrow('jwt.accessSecret', { infer: true }),
+        expiresIn: accessExpiresIn as JwtSignOptions['expiresIn'],
+      },
+    );
     return { accessToken, refreshToken };
+  }
+
+  private async revokeSessionsForReuse(userId: string): Promise<void> {
+    await this.prisma.$transaction([
+      this.prisma.user.update({ where: { id: userId }, data: { tokenVersion: { increment: 1 } } }),
+      this.prisma.userSession.updateMany({ where: { userId, revokedAt: null }, data: { revokedAt: new Date() } }),
+      this.prisma.activityLog.create({
+        data: {
+          userId,
+          action: 'REFRESH_TOKEN_REUSE_DETECTED',
+          entity: 'UserSession',
+          description: 'Refresh token replay detected; all sessions revoked',
+        },
+      }),
+    ]);
   }
 
   private parseDuration(value: string): number {

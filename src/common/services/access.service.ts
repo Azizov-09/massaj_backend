@@ -23,7 +23,6 @@ export class AccessService {
             OR: [
               { attendances: { some: { specialistId: specialist.id } } },
               { assessments: { some: { specialistId: specialist.id } } },
-              { goals: { some: { specialistId: specialist.id } } },
               { progressEntries: { some: { specialistId: specialist.id } } },
             ],
           },

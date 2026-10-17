@@ -9,7 +9,7 @@ import { PrismaService } from '../../database/prisma.service';
 import { AppConfiguration } from '../../config/configuration';
 import { UserStatus } from '@prisma/client';
 
-interface AccessPayload { sub: string; role: RequestUser['role']; tv: number; }
+interface AccessPayload { sub: string; sid: string; role: RequestUser['role']; tv: number; }
 
 @Injectable()
 export class JwtAuthGuard implements CanActivate {
@@ -28,9 +28,29 @@ export class JwtAuthGuard implements CanActivate {
     try {
       const secret = this.config.get('jwt.accessSecret', { infer: true }) || process.env.JWT_ACCESS_SECRET;
       const payload = await this.jwt.verifyAsync<AccessPayload>(authorization.slice(7), { secret });
-      const user = await this.prisma.user.findUnique({ where: { id: payload.sub }, select: { status: true, tokenVersion: true } });
-      if (!user || user.status !== UserStatus.ACTIVE || user.tokenVersion !== payload.tv) throw new UnauthorizedException('Session is no longer valid');
-      request.user = { id: payload.sub, role: payload.role, tokenVersion: payload.tv };
+      if (!payload.sid) throw new UnauthorizedException('Access token is not bound to a session');
+      const [user, session] = await Promise.all([
+        this.prisma.user.findUnique({
+          where: { id: payload.sub },
+          select: { status: true, tokenVersion: true, role: true },
+        }),
+        this.prisma.userSession.findUnique({
+          where: { id: payload.sid },
+          select: { userId: true, revokedAt: true, expiresAt: true },
+        }),
+      ]);
+      if (
+        !user ||
+        user.status !== UserStatus.ACTIVE ||
+        user.tokenVersion !== payload.tv ||
+        !session ||
+        session.userId !== payload.sub ||
+        session.revokedAt !== null ||
+        session.expiresAt <= new Date()
+      ) {
+        throw new UnauthorizedException('Session is no longer valid');
+      }
+      request.user = { id: payload.sub, role: user.role, tokenVersion: payload.tv, sessionId: payload.sid };
       return true;
     } catch {
       throw new UnauthorizedException('Invalid or expired access token');

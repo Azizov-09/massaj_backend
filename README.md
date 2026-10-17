@@ -16,12 +16,12 @@
   - Refresh token reuse detection: invalidating all sessions if an old token is replayed.
   - Account lockout after 5 consecutive failed login attempts (15-minute cooldown).
 - **Financial Integrity**:
-  - Monetary values stored in smallest currency units (Tiyin) to prevent floating-point inaccuracies.
+  - Monetary values are stored as positive whole UZS integers; clients must not multiply amounts by 100.
   - Transactions managed inside ACID transactions with balance verification and refund threshold validations.
 - **Clinical & Rehabilitation Engine**:
   - Structured clinical records, assessments, and rehabilitation notes.
-  - Treatment courses, milestone tracking, and goal progress logging.
-  - Appointment lifecycle state machine with double-booking prevention and specialist conflict checking.
+  - Clinical assessments, attendance records, and developmental progress tracking.
+  - Explicit clinical event timestamps, relation-aware responses, and future-completion validation.
 - **Async Processing & Infrastructure**:
   - Asynchronous background jobs powered by Redis and BullMQ.
   - SMS gateway integration (Eskiz.uz) with exponential backoff retry and mock delivery mode for non-production environments.
@@ -98,15 +98,13 @@ Interactive documentation is fully configured and annotated across all modules w
   - `Authentication`: Login, refresh, multi-device logout, change password
   - `Profiles`: Parent, Specialist, and Admin management
   - `Children`: Child registry, parent delegation links, archiving
-  - `Appointments`: Booking, slot lock collision prevention, status transitions
-  - `Sessions`: Clinical treatment records, observation notes, completion
-  - `Clinical Records`: Attendance, assessments, milestone progress, therapy goals
+  - `Clinical Records`: Attendance, assessments, and milestone progress
   - `Finance`: Payments, ledger transactions, refunds, balances, debtor summaries
   - `Services`: Therapy catalog, duration, pricing
   - `Role Portals`: Dedicated endpoints for Parents and Specialists
   - `Platform`: Legal consents, medical documents, clinic settings, audit logs
   - `Announcements`: Broadcast messages and notifications
-  - `Analytics`: Executive dashboards, revenue, debt, and appointment KPIs
+  - `Analytics`: Executive dashboards, revenue, debt, and attendance KPIs
   - `Reports`: Comprehensive operational, financial, and clinical reports
   - `Notifications`: In-app notification feed, preferences, and delivery statistics
   - `Health Probes`: PostgreSQL and Redis health status
@@ -129,6 +127,13 @@ npm run typecheck
 
 # Production build test
 npm run build
+
+# Apply all migrations and run E2E in a generated local PostgreSQL schema
+# plus an empty, dedicated local Redis test database
+npm run test:e2e:isolated
+
+# Read-only database integrity report (non-zero exit means issues were found)
+npm run audit:data-integrity
 ```
 
 ---
@@ -149,8 +154,7 @@ src/
 └── modules/
     ├── analytics/        # Executive KPIs, retention, occupancy
     ├── announcements/    # Internal broadcast messages
-    ├── appointments/     # Scheduling, slot locks, status transitions
-    ├── auth/             # Login, register, refresh, logout, password reset
+    ├── auth/             # Login, refresh rotation, logout, password change
     ├── children/         # Child profiles, parent delegation
     ├── clinical/         # Clinical notes, treatment plans, contraindications
     ├── finance/          # Payments, invoices, refunds, transactions
@@ -160,8 +164,7 @@ src/
     ├── portals/          # Dedicated parent & specialist workflows
     ├── profiles/         # User and specialist profile management
     ├── reports/          # Financial and clinical reporting
-    ├── services/         # Center service catalog & pricing tiers
-    └── sessions/         # Session execution, attendance tracking
+    └── services/         # Center service catalog & pricing tiers
 ```
 
 ---

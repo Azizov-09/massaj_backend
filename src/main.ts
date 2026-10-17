@@ -2,6 +2,7 @@ import 'reflect-metadata';
 import { ClassSerializerInterceptor, Logger, ValidationPipe } from '@nestjs/common';
 import { NestFactory, Reflector } from '@nestjs/core';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
+import { NestExpressApplication } from '@nestjs/platform-express';
 import helmet from 'helmet';
 import cookieParser from 'cookie-parser';
 import { AppModule } from './app/app.module';
@@ -11,7 +12,8 @@ import { seedSuperAdmin } from './database/super-admin.seed';
 
 async function bootstrap(): Promise<void> {
   const logger = new Logger('Bootstrap');
-  const app = await NestFactory.create(AppModule, { bufferLogs: true });
+  const app = await NestFactory.create<NestExpressApplication>(AppModule, { bufferLogs: true });
+  app.set('trust proxy', 1);
 
   app.setGlobalPrefix('api/v1');
 
@@ -34,12 +36,9 @@ async function bootstrap(): Promise<void> {
   app.use(cookieParser());
 
   // Cross-Origin Resource Sharing (CORS) Policy
-  const allowedOrigins: (string | RegExp)[] = [
-    'https://massaj-frontent.vercel.app',
-    'http://localhost:5173',
-    'http://localhost:3000',
-    /^https:\/\/massaj-frontent.*\.vercel\.app$/,
-  ];
+  const isProd = process.env.NODE_ENV === 'production';
+  const allowedOrigins: string[] = ['https://massaj-frontent.vercel.app'];
+  if (!isProd) allowedOrigins.push('http://localhost:5173', 'http://localhost:3000');
   if (process.env.FRONTEND_URL && !allowedOrigins.includes(process.env.FRONTEND_URL)) {
     allowedOrigins.push(process.env.FRONTEND_URL);
   }
@@ -49,7 +48,6 @@ async function bootstrap(): Promise<void> {
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept', 'Origin'],
-    exposedHeaders: ['Set-Cookie'],
   });
 
   // Strict Global Validation Pipe
@@ -95,7 +93,7 @@ async function bootstrap(): Promise<void> {
     .addTag('Employees', 'Non-medical staff management — receptionist, nurse, accountant, etc.')
     .addTag('Profiles', 'Admin, Specialist, and Parent account profile operations')
     .addTag('Children', 'Child records, intake profiles, and parental custody delegation')
-    .addTag('Clinical Records', 'SOAP clinical assessments, developmental milestones, and therapy goals')
+    .addTag('Clinical Records', 'Clinical assessments, attendance, and developmental progress')
     .addTag('Finance', 'Payments, balance calculations, refunds, and double-entry ledger transactions')
     .addTag('Services', 'Clinic therapy service catalog, duration, and price tiers')
     .addTag('Role Portals', 'Dedicated role-specific portals for parents and specialists')
@@ -107,16 +105,19 @@ async function bootstrap(): Promise<void> {
     .addTag('Health Probes', 'PostgreSQL and Redis liveness and readiness probes')
     .build();
 
-  const document = SwaggerModule.createDocument(app, config);
-  SwaggerModule.setup('api/docs', app, document, {
-    swaggerOptions: {
-      persistAuthorization: true,
-      tagsSorter: 'alpha',
-      operationsSorter: 'alpha',
-      docExpansion: 'none',
-      filter: true,
-    },
-  });
+  const swaggerEnabled = !isProd || process.env.SWAGGER_ENABLED === 'true';
+  if (swaggerEnabled) {
+    const document = SwaggerModule.createDocument(app, config);
+    SwaggerModule.setup('api/docs', app, document, {
+      swaggerOptions: {
+        persistAuthorization: true,
+        tagsSorter: 'alpha',
+        operationsSorter: 'alpha',
+        docExpansion: 'none',
+        filter: true,
+      },
+    });
+  }
 
   const prisma = app.get(PrismaService);
   prisma.enableShutdownHooks(app);
@@ -129,7 +130,6 @@ async function bootstrap(): Promise<void> {
   }
 
   // Auto-seed mock data on startup only in non-production environments if explicitly requested or empty db
-  const isProd = process.env.NODE_ENV === 'production';
   const autoSeed = process.env.AUTO_SEED === 'true';
   try {
     const userCount = await prisma.user.count();
@@ -146,7 +146,7 @@ async function bootstrap(): Promise<void> {
   const port = Number(process.env.PORT ?? 3000);
   await app.listen(port, '0.0.0.0');
   logger.log(`Server listening on port ${port}`);
-  logger.log(`Swagger documentation available at http://localhost:${port}/api/docs`);
+  if (swaggerEnabled) logger.log(`Swagger documentation available at http://localhost:${port}/api/docs`);
 }
 
 void bootstrap();

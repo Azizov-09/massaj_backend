@@ -3,6 +3,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import request from 'supertest';
 import cookieParser from 'cookie-parser';
 import * as argon2 from 'argon2';
+import { JwtService } from '@nestjs/jwt';
 import { AppModule } from '../src/app/app.module';
 import { PrismaService } from '../src/database/prisma.service';
 import { Gender, PaymentMethod, Role, UserStatus } from '@prisma/client';
@@ -185,7 +186,7 @@ describe('Rehabilitation Center CRM (Comprehensive E2E Tests)', () => {
   });
 
   afterAll(async () => {
-    await app.close();
+    if (app) await app.close();
   });
 
   describe('Health Check (PostgreSQL & Redis)', () => {
@@ -280,6 +281,54 @@ describe('Rehabilitation Center CRM (Comprehensive E2E Tests)', () => {
         .post('/api/v1/auth/refresh')
         .send({ refreshToken: rawRefreshToken })
         .expect(401);
+
+      await request(app.getHttpServer())
+        .get('/api/v1/services')
+        .set('Authorization', `Bearer ${refreshRes.body.accessToken}`)
+        .expect(401);
+
+      // Replay containment revokes every ADMIN session, so establish a new session
+      // before later authorization scenarios.
+      const relogin = await request(app.getHttpServer())
+        .post('/api/v1/auth/login')
+        .send({ phone: '+998900000002', password: testPassword })
+        .expect(200);
+      adminToken = relogin.body.accessToken;
+    });
+
+    it('rejects an expired access token but refreshes its still-valid session cookie', async () => {
+      const loginRes = await request(app.getHttpServer())
+        .post('/api/v1/auth/login')
+        .send({ phone: '+998900000004', password: testPassword })
+        .expect(200);
+
+      const jwt = app.get(JwtService);
+      const payload = jwt.decode(loginRes.body.accessToken) as {
+        sub: string;
+        sid: string;
+        role: Role;
+        tv: number;
+      };
+      const expiredAccessToken = await jwt.signAsync(
+        { sub: payload.sub, sid: payload.sid, role: payload.role, tv: payload.tv },
+        { secret: process.env.JWT_ACCESS_SECRET, expiresIn: -1 },
+      );
+
+      await request(app.getHttpServer())
+        .get('/api/v1/parent/my-children')
+        .set('Authorization', `Bearer ${expiredAccessToken}`)
+        .expect(401);
+
+      const refreshCookie = ((loginRes.headers['set-cookie'] as string[] | undefined) ?? [])[0]
+        ?.split(';')[0];
+      expect(refreshCookie).toBeDefined();
+      const refreshRes = await request(app.getHttpServer())
+        .post('/api/v1/auth/refresh')
+        .set('Cookie', refreshCookie ?? '')
+        .send({})
+        .expect(200);
+
+      expect(refreshRes.body.accessToken).toBeDefined();
     });
 
     it('rejects unknown DTO fields due to forbidNonWhitelisted (400)', async () => {
@@ -370,17 +419,31 @@ describe('Rehabilitation Center CRM (Comprehensive E2E Tests)', () => {
         .expect(403);
     });
 
-    it('Specialist can access assigned child (200)', async () => {
+    it('Specialist cannot access a child before an assignment record exists (403)', async () => {
       await request(app.getHttpServer())
         .get(`/api/v1/children/${childId}`)
         .set('Authorization', `Bearer ${specialistToken}`)
-        .expect(200);
+        .expect(403);
     });
 
     it('Parent 1 cannot access global finance or other parent balance (403)', async () => {
       await request(app.getHttpServer())
         .get(`/api/v1/parents/${parent2ProfileId}/balance`)
         .set('Authorization', `Bearer ${parentToken}`)
+        .expect(403);
+    });
+
+    it('Parent cannot perform a financial mutation even for their own child (403)', async () => {
+      await request(app.getHttpServer())
+        .post('/api/v1/payments')
+        .set('Authorization', `Bearer ${parentToken}`)
+        .send({
+          parentId: parentProfileId,
+          childId,
+          amount: 10_000,
+          method: PaymentMethod.CASH,
+          idempotencyKey: `forbidden-parent-payment-${Date.now()}`,
+        })
         .expect(403);
     });
   });
@@ -391,7 +454,7 @@ describe('Rehabilitation Center CRM (Comprehensive E2E Tests)', () => {
     it('records attendance for child without creating appointments', async () => {
       const res = await request(app.getHttpServer())
         .post('/api/v1/attendance')
-        .set('Authorization', `Bearer ${specialistToken}`)
+        .set('Authorization', `Bearer ${adminToken}`)
         .send({
           childId,
           specialistId: specialistProfileId,
@@ -405,11 +468,19 @@ describe('Rehabilitation Center CRM (Comprehensive E2E Tests)', () => {
       attendanceId = res.body.id;
     });
 
+    it('allows the assigned specialist to access the child after attendance assignment', async () => {
+      await request(app.getHttpServer())
+        .get(`/api/v1/children/${childId}`)
+        .set('Authorization', `Bearer ${specialistToken}`)
+        .expect(200);
+    });
+
     it('updates attendance note and status', async () => {
       const res = await request(app.getHttpServer())
         .patch(`/api/v1/attendance/${attendanceId}`)
         .set('Authorization', `Bearer ${specialistToken}`)
         .send({
+          status: 'PRESENT',
           note: 'Updated: Excellent engagement during physical therapy.',
         })
         .expect(200);
@@ -435,21 +506,21 @@ describe('Rehabilitation Center CRM (Comprehensive E2E Tests)', () => {
       expect(res.body.some((a: any) => a.id === attendanceId)).toBe(true);
     });
 
-    it('simulates direct SESSION_CHARGE transaction for therapy service', async () => {
-      // Record a therapy service charge directly to test debt & payment ledger
-      const tx = await prisma.transaction.create({
-        data: {
+    it('records a SESSION_CHARGE through the protected finance API', async () => {
+      const res = await request(app.getHttpServer())
+        .post('/api/v1/charges')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({
           parentId: parentProfileId,
           childId,
-          type: 'SESSION_CHARGE',
-          direction: 'OUT',
           amount: 150_000,
           description: 'Charge for completed physical rehabilitation therapy',
-        },
-      });
+          idempotencyKey: `charge-e2e-${Date.now()}`,
+        })
+        .expect(201);
 
-      expect(tx.id).toBeDefined();
-      expect(tx.amount).toBe(150_000);
+      expect(res.body.transaction.id).toBeDefined();
+      expect(res.body.transaction.amount).toBe(150_000);
 
       // Verify Parent 1 now has debt = 150_000
       const debtRes = await request(app.getHttpServer())
@@ -461,24 +532,138 @@ describe('Rehabilitation Center CRM (Comprehensive E2E Tests)', () => {
     });
   });
 
-  describe('Transactional Finance (Debt-First Allocation & Refunds)', () => {
-    it('records manual payment: pays off 150k debt and leaves 50k balance', async () => {
-      // Payment of 200_000 against 150_000 debt -> remaining balance = 50_000, debt = 0
-      const res = await request(app.getHttpServer())
-        .post('/api/v1/payments')
+  describe('Clinical Assessment & Progress Relations', () => {
+    let assessmentId: string;
+    let progressId: string;
+
+    it('creates, lists, and retrieves an assessment with child/specialist identities', async () => {
+      const assessedAt = new Date(Date.now() - 60_000).toISOString();
+      const createRes = await request(app.getHttpServer())
+        .post('/api/v1/assessments')
         .set('Authorization', `Bearer ${adminToken}`)
         .send({
-          parentId: parentProfileId,
           childId,
-          amount: 200_000,
-          method: PaymentMethod.CASH,
-          note: 'Payment in center desk',
-          idempotencyKey: `pay-e2e-${Date.now()}`,
+          specialistId: specialistProfileId,
+          professionalObservation: 'Age-appropriate motor response with improving coordination.',
+          assessedAt,
         })
         .expect(201);
 
-      expect(res.body.id).toBeDefined();
-      paymentId = res.body.id;
+      assessmentId = createRes.body.id;
+      expect(createRes.body.child.fullName).toBe('E2E-Child Temirov');
+      expect(createRes.body.specialist.fullName).toBe('Specialist E2E');
+      expect(createRes.body.assessmentDate).toBe(assessedAt);
+
+      const listRes = await request(app.getHttpServer())
+        .get('/api/v1/assessments')
+        .query({ childId, specialistId: specialistProfileId, page: 1, limit: 10 })
+        .set('Authorization', `Bearer ${adminToken}`)
+        .expect(200);
+      expect(listRes.body.items.some((row: { id: string }) => row.id === assessmentId)).toBe(true);
+
+      const detailRes = await request(app.getHttpServer())
+        .get(`/api/v1/assessments/${assessmentId}`)
+        .set('Authorization', `Bearer ${parentToken}`)
+        .expect(200);
+      expect(detailRes.body.child.id).toBe(childId);
+      expect(detailRes.body.specialist.id).toBe(specialistProfileId);
+    });
+
+    it('keeps treating specialist and record creator explicit in progress responses', async () => {
+      const occurredAt = new Date(Date.now() - 30_000).toISOString();
+      const createRes = await request(app.getHttpServer())
+        .post('/api/v1/progress')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({
+          childId,
+          specialistId: specialistProfileId,
+          title: 'Improved shoulder mobility',
+          description: 'The child completed the guided mobility sequence without discomfort.',
+          occurredAt,
+        })
+        .expect(201);
+
+      progressId = createRes.body.id;
+      expect(createRes.body.child.fullName).toBe('E2E-Child Temirov');
+      expect(createRes.body.specialist.fullName).toBe('Specialist E2E');
+      expect(createRes.body.recordedBy.fullName).toBe('Admin E2E');
+      expect(createRes.body.progressDate).toBe(occurredAt);
+
+      const listRes = await request(app.getHttpServer())
+        .get('/api/v1/progress')
+        .query({ childId, specialistId: specialistProfileId, page: 1, limit: 10 })
+        .set('Authorization', `Bearer ${parentToken}`)
+        .expect(200);
+      expect(listRes.body.items.some((row: { id: string }) => row.id === progressId)).toBe(true);
+    });
+
+    it('rejects a future completed progress record without writing it', async () => {
+      const before = await prisma.progressEntry.count({ where: { childId } });
+      await request(app.getHttpServer())
+        .post('/api/v1/progress')
+        .set('Authorization', `Bearer ${specialistToken}`)
+        .send({
+          childId,
+          title: 'Impossible future completion',
+          description: 'This record must be rejected because it claims future clinical work.',
+          occurredAt: new Date(Date.now() + 86_400_000).toISOString(),
+        })
+        .expect(400);
+      expect(await prisma.progressEntry.count({ where: { childId } })).toBe(before);
+    });
+  });
+
+  describe('Transactional Finance (Debt-First Allocation & Refunds)', () => {
+    it('rejects an unrelated parent-child payment without partial writes', async () => {
+      const key = `invalid-relation-e2e-${Date.now()}`;
+      await request(app.getHttpServer())
+        .post('/api/v1/payments')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({
+          parentId: parent2ProfileId,
+          childId,
+          amount: 25_000,
+          method: PaymentMethod.CASH,
+          idempotencyKey: key,
+        })
+        .expect(400);
+
+      expect(await prisma.payment.count({ where: { idempotencyKey: key } })).toBe(0);
+      expect(await prisma.transaction.count({ where: { idempotencyKey: `payment:${key}` } })).toBe(0);
+    });
+
+    it('records manual payment: pays off 150k debt and leaves 50k balance', async () => {
+      // Payment of 200_000 against 150_000 debt -> remaining balance = 50_000, debt = 0
+      const idempotencyKey = `pay-e2e-${Date.now()}`;
+      const payload = {
+        parentId: parentProfileId,
+        childId,
+        amount: 200_000,
+        method: PaymentMethod.CASH,
+        note: 'Payment in center desk',
+        idempotencyKey,
+      };
+      const [first, duplicate] = await Promise.all([
+        request(app.getHttpServer())
+          .post('/api/v1/payments')
+          .set('Authorization', `Bearer ${adminToken}`)
+          .send(payload)
+          .expect(201),
+        request(app.getHttpServer())
+          .post('/api/v1/payments')
+          .set('Authorization', `Bearer ${adminToken}`)
+          .send(payload)
+          .expect(201),
+      ]);
+
+      expect(first.body.id).toBeDefined();
+      expect(duplicate.body.id).toBe(first.body.id);
+      paymentId = first.body.id;
+      expect(await prisma.payment.count({ where: { idempotencyKey } })).toBe(1);
+      expect(await prisma.transaction.count({ where: { idempotencyKey: `payment:${idempotencyKey}` } })).toBe(1);
+      expect(await prisma.notification.count({
+        where: { relatedEntity: 'Payment', relatedEntityId: paymentId },
+      })).toBe(1);
 
       // Verify Parent 1 balance and debt
       const balRes = await request(app.getHttpServer())
@@ -502,7 +687,8 @@ describe('Rehabilitation Center CRM (Comprehensive E2E Tests)', () => {
         .set('Authorization', `Bearer ${adminToken}`)
         .send({
           amount: 30_000,
-          reason: 'Client overpaid request',
+          note: 'Client overpaid request',
+          idempotencyKey: `refund-e2e-${Date.now()}`,
         })
         .expect(201);
 
@@ -544,11 +730,16 @@ describe('Rehabilitation Center CRM (Comprehensive E2E Tests)', () => {
 
       // Parent 1 can see published announcement in portal
       const listRes = await request(app.getHttpServer())
-        .get('/api/v1/announcements')
+        .get('/api/v1/announcements/my')
         .set('Authorization', `Bearer ${parentToken}`)
         .expect(200);
 
-      expect(listRes.body.items.some((a: any) => a.id === announcementId)).toBe(true);
+      expect(
+        listRes.body.some(
+          (recipient: { announcement?: { id?: string } }) =>
+            recipient.announcement?.id === announcementId,
+        ),
+      ).toBe(true);
     });
   });
 

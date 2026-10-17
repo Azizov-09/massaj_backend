@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Post, Query } from '@nestjs/common';
+import { Body, Controller, Get, Param, ParseUUIDPipe, Post, Query } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiParam, ApiPropertyOptional, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { Role } from '@prisma/client';
 import { IsDateString, IsOptional, IsUUID, Max, Min } from 'class-validator';
@@ -82,7 +82,7 @@ export class FinanceController {
   @ApiParam({ name: 'id', description: 'Payment UUID' })
   @ApiResponse({ status: 200, description: 'Payment details.' })
   @ApiResponse({ status: 404, description: 'Payment not found.' })
-  paymentById(@Param('id') id: string) {
+  paymentById(@Param('id', ParseUUIDPipe) id: string) {
     return this.finance.paymentById(id);
   }
 
@@ -92,7 +92,7 @@ export class FinanceController {
   @ApiParam({ name: 'id', description: 'Payment UUID' })
   @ApiResponse({ status: 201, description: 'Refund processed successfully.' })
   @ApiResponse({ status: 400, description: 'Refund amount exceeds remaining refundable amount.' })
-  refund(@Param('id') id: string, @Body() dto: RefundDto, @CurrentUser() user: RequestUser) {
+  refund(@Param('id', ParseUUIDPipe) id: string, @Body() dto: RefundDto, @CurrentUser() user: RequestUser) {
     return this.finance.refund(id, dto, user.id);
   }
 
@@ -110,7 +110,7 @@ export class FinanceController {
   @ApiOperation({ summary: 'Get Single Ledger Transaction' })
   @ApiParam({ name: 'id', description: 'Transaction UUID' })
   @ApiResponse({ status: 200, description: 'Transaction details.' })
-  transactionById(@Param('id') id: string) {
+  transactionById(@Param('id', ParseUUIDPipe) id: string) {
     return this.finance.transactionById(id);
   }
 
@@ -128,32 +128,35 @@ export class FinanceController {
   @ApiOperation({ summary: 'Get Financial State For Specific Parent' })
   @ApiParam({ name: 'parentId', description: 'Parent UUID' })
   @ApiResponse({ status: 200, description: 'Account balance and debt summary.' })
-  debtor(@Param('parentId') parentId: string) {
+  debtor(@Param('parentId', ParseUUIDPipe) parentId: string) {
     return this.finance.stateForParent(parentId);
   }
 
   // Child balance
   @Get('children/:childId/balance')
+  @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.PARENT)
   @ApiOperation({ summary: 'Get Balance/Debt For Child' })
   @ApiParam({ name: 'childId', description: 'Child UUID' })
   @ApiResponse({ status: 200, description: 'Child balance state.' })
-  childBalance(@Param('childId') childId: string, @CurrentUser() user: RequestUser) {
+  childBalance(@Param('childId', ParseUUIDPipe) childId: string, @CurrentUser() user: RequestUser) {
     return this.finance.stateForChild(childId, user);
   }
 
   @Get('parents/:parentId/balance')
+  @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.PARENT)
   @ApiOperation({ summary: 'Get Balance/Debt For Parent' })
   @ApiParam({ name: 'parentId', description: 'Parent UUID' })
   @ApiResponse({ status: 200, description: 'Parent balance state.' })
-  parentBalance(@Param('parentId') parentId: string, @CurrentUser() user: RequestUser) {
+  parentBalance(@Param('parentId', ParseUUIDPipe) parentId: string, @CurrentUser() user: RequestUser) {
     return this.finance.parentBalance(parentId, user);
   }
 
   @Get('parents/:parentId/financial-summary')
+  @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.PARENT)
   @ApiOperation({ summary: 'Full Financial Summary for Parent' })
   @ApiParam({ name: 'parentId', description: 'Parent UUID' })
   @ApiResponse({ status: 200, description: 'Full breakdown of invoices, payments, and balance.' })
-  financialSummary(@Param('parentId') parentId: string, @CurrentUser() user: RequestUser) {
+  financialSummary(@Param('parentId', ParseUUIDPipe) parentId: string, @CurrentUser() user: RequestUser) {
     return this.finance.financialSummary(parentId, user);
   }
 }

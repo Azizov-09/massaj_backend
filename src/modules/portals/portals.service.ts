@@ -9,8 +9,7 @@ export class PortalsService {
   async parentChildren(userId: string) { return this.prisma.childParent.findMany({ where: { parent: { userId } }, include: { child: true }, orderBy: { child: { createdAt: 'desc' } } }); }
   parentAssessments(userId: string) { return this.prisma.assessment.findMany({ where: { child: { parents: { some: { parent: { userId } } } } }, include: { child: true, specialist: { include: { user: { select: { fullName: true } } } } }, orderBy: { createdAt: 'desc' } }); }
   parentAttendances(userId: string) { return this.prisma.attendance.findMany({ where: { child: { parents: { some: { parent: { userId } } } } }, include: { child: true, specialist: { include: { user: { select: { fullName: true } } } } }, orderBy: { date: 'desc' } }); }
-  parentProgress(userId: string) { return this.prisma.progressEntry.findMany({ where: { child: { parents: { some: { parent: { userId } } } } }, include: { child: true, specialist: { include: { user: { select: { fullName: true } } } } }, orderBy: { createdAt: 'desc' } }); }
-  parentGoals(userId: string) { return this.prisma.goal.findMany({ where: { child: { parents: { some: { parent: { userId } } } } }, include: { child: true, specialist: { include: { user: { select: { fullName: true } } } } }, orderBy: { createdAt: 'desc' } }); }
+  parentProgress(userId: string) { return this.prisma.progressEntry.findMany({ where: { child: { parents: { some: { parent: { userId } } } } }, include: { child: true, specialist: { include: { user: { select: { fullName: true } } } }, createdBy: { select: { id: true, fullName: true, role: true } } }, orderBy: { occurredAt: 'desc' } }); }
   async parentPayments(userId: string) { return this.prisma.payment.findMany({ where: { parent: { userId } }, orderBy: { paidAt: 'desc' } }); }
   async parentState(userId: string) { return this.finance.stateForParent(await this.parentId(userId)); }
   async specialistChildren(userId: string) {
@@ -20,7 +19,6 @@ export class PortalsService {
         OR: [
           { attendances: { some: { specialistId: id } } },
           { assessments: { some: { specialistId: id } } },
-          { goals: { some: { specialistId: id } } },
           { progressEntries: { some: { specialistId: id } } },
         ],
       },
@@ -36,6 +34,5 @@ export class PortalsService {
     });
   }
   async specialistAssessments(userId: string) { const id = await this.specialistId(userId); return this.prisma.assessment.findMany({ where: { specialistId: id }, include: { child: true }, orderBy: { createdAt: 'desc' } }); }
-  async specialistProgress(userId: string) { const id = await this.specialistId(userId); return this.prisma.progressEntry.findMany({ where: { specialistId: id }, include: { child: true }, orderBy: { createdAt: 'desc' } }); }
-  async specialistGoals(userId: string) { const id = await this.specialistId(userId); return this.prisma.goal.findMany({ where: { specialistId: id }, include: { child: true }, orderBy: { createdAt: 'desc' } }); }
+  async specialistProgress(userId: string) { const id = await this.specialistId(userId); return this.prisma.progressEntry.findMany({ where: { specialistId: id }, include: { child: true, createdBy: { select: { id: true, fullName: true, role: true } } }, orderBy: { occurredAt: 'desc' } }); }
 }

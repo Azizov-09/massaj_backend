@@ -130,7 +130,7 @@ export class AdminsService {
   }
 
   async update(id: string, dto: UpdateAdminDto, actorId: string) {
-    await this.findOne(id);
+    const current = await this.findOne(id);
 
     let phone: string | undefined;
     if (dto.phone) {
@@ -153,34 +153,62 @@ export class AdminsService {
       else if (dto.status === 'BLOCKED') statusVal = UserStatus.BLOCKED;
     }
 
-    try {
-      const updated = await this.prisma.user.update({
-        where: { id },
-        data: {
-          ...(dto.fullName && { fullName: dto.fullName }),
-          ...(dto.email !== undefined && { email: dto.email }),
-          ...(phone && { phone }),
-          ...(dto.role && { role: dto.role }),
-          ...(statusVal && { status: statusVal }),
-          ...(passwordHash && {
-            passwordHash,
-            tokenVersion: { increment: 1 },
-            passwordChangedAt: new Date(),
-          }),
-        },
-        select: {
-          id: true,
-          fullName: true,
-          phone: true,
-          email: true,
-          role: true,
-          status: true,
-          updatedAt: true,
-        },
-      });
+    if (id === actorId && ((dto.role && dto.role !== Role.SUPER_ADMIN) || (statusVal && statusVal !== UserStatus.ACTIVE))) {
+      throw new ForbiddenException('You cannot remove your own SUPER_ADMIN access');
+    }
 
-      await this.log(actorId, 'ADMIN_UPDATED', 'User', id, `Updated admin profile: ${updated.fullName} (${updated.role})`);
-      return updated;
+    const removesSuperAdmin =
+      current.role === Role.SUPER_ADMIN &&
+      ((dto.role !== undefined && dto.role !== Role.SUPER_ADMIN) ||
+        (statusVal !== undefined && statusVal !== UserStatus.ACTIVE));
+    if (removesSuperAdmin) {
+      const activeSuperAdmins = await this.prisma.user.count({
+        where: { role: Role.SUPER_ADMIN, status: UserStatus.ACTIVE },
+      });
+      if (activeSuperAdmins <= 1) throw new ForbiddenException('The last active SUPER_ADMIN cannot be demoted or disabled');
+    }
+
+    try {
+      return await this.prisma.$transaction(async (tx) => {
+        const securityChanged = Boolean(dto.role || statusVal || passwordHash);
+        const updated = await tx.user.update({
+          where: { id },
+          data: {
+            ...(dto.fullName && { fullName: dto.fullName }),
+            ...(dto.email !== undefined && { email: dto.email }),
+            ...(phone && { phone }),
+            ...(dto.role && { role: dto.role }),
+            ...(statusVal && { status: statusVal }),
+            ...(passwordHash && { passwordHash, passwordChangedAt: new Date() }),
+            ...(securityChanged && { tokenVersion: { increment: 1 } }),
+          },
+          select: {
+            id: true,
+            fullName: true,
+            phone: true,
+            email: true,
+            role: true,
+            status: true,
+            updatedAt: true,
+          },
+        });
+        if (securityChanged) {
+          await tx.userSession.updateMany({
+            where: { userId: id, revokedAt: null },
+            data: { revokedAt: new Date() },
+          });
+        }
+        await tx.activityLog.create({
+          data: {
+            userId: actorId,
+            action: 'ADMIN_UPDATED',
+            entity: 'User',
+            entityId: id,
+            description: `Updated admin profile: ${updated.fullName} (${updated.role})`,
+          },
+        });
+        return updated;
+      });
     } catch (err: unknown) {
       if (typeof err === 'object' && err !== null && 'code' in err && err.code === 'P2002') {
         throw new ConflictException('Phone number or email already in use');

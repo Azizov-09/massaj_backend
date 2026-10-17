@@ -59,33 +59,42 @@ describe('seedSuperAdmin', () => {
     });
   });
 
-  it('should update existing user to SUPER_ADMIN role and create Admin record if missing', async () => {
+  it('refuses to silently elevate an existing non-SUPER_ADMIN account', async () => {
     mockPrisma.user.findUnique.mockResolvedValue({
       id: 'existing-id-123',
       phone: '+998901000001',
       role: Role.ADMIN,
       admin: null,
     });
-    mockPrisma.user.update.mockResolvedValue({ id: 'existing-id-123', role: Role.SUPER_ADMIN });
-    mockPrisma.admin.create.mockResolvedValue({ id: 'admin-uuid-1' });
+    await expect(seedSuperAdmin(mockPrisma as unknown as PrismaClient)).rejects.toThrow(
+      'not a complete SUPER_ADMIN profile',
+    );
+    expect(mockPrisma.user.update).not.toHaveBeenCalled();
+    expect(mockPrisma.admin.create).not.toHaveBeenCalled();
+  });
+
+  it('does not reset credentials or unlock an existing SUPER_ADMIN on startup', async () => {
+    mockPrisma.user.findUnique.mockResolvedValue({
+      id: 'existing-id-123',
+      phone: '+998901000001',
+      role: Role.SUPER_ADMIN,
+      admin: { id: 'admin-1' },
+    });
 
     await seedSuperAdmin(mockPrisma as unknown as PrismaClient);
 
-    expect(mockPrisma.user.update).toHaveBeenCalledWith({
-      where: { id: 'existing-id-123' },
-      data: {
-        fullName: 'Super Admin Test',
-        email: 'super@test.uz',
-        role: Role.SUPER_ADMIN,
-        status: UserStatus.ACTIVE,
-        passwordHash: 'hashed_super_admin_pass',
-        failedLoginCount: 0,
-        lockedUntil: null,
-      },
-    });
-    expect(mockPrisma.admin.create).toHaveBeenCalledWith({
-      data: { userId: 'existing-id-123' },
-    });
+    expect(argon2.hash).not.toHaveBeenCalled();
+    expect(mockPrisma.user.update).not.toHaveBeenCalled();
+  });
+
+  it('skips bootstrap when credentials are not configured', async () => {
+    delete process.env.SUPER_ADMIN_PHONE;
+    delete process.env.SUPER_ADMIN_PASSWORD;
+    delete process.env.SUPER_ADMIN_FULL_NAME;
+
+    await seedSuperAdmin(mockPrisma as unknown as PrismaClient);
+
+    expect(mockPrisma.user.findUnique).not.toHaveBeenCalled();
   });
 
   it('should not throw if phone format is invalid', async () => {

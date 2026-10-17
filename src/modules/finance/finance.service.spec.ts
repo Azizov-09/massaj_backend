@@ -1,8 +1,10 @@
-import { BadRequestException } from '@nestjs/common';
+import { BadRequestException, ConflictException } from '@nestjs/common';
 import { PaymentMethod, TransactionDirection, TransactionType } from '@prisma/client';
+import { validate } from 'class-validator';
 import { FinanceService } from './finance.service';
 import { PrismaService } from '../../database/prisma.service';
 import { NotificationsService } from '../notifications/notifications.service';
+import { RecordPaymentDto } from './dto/finance.dto';
 
 describe('FinanceService Unit Tests', () => {
   let service: FinanceService;
@@ -35,6 +37,7 @@ describe('FinanceService Unit Tests', () => {
       },
       parent: {
         findUnique: jest.fn(),
+        findFirst: jest.fn(),
       },
       child: {
         findUnique: jest.fn(),
@@ -49,6 +52,7 @@ describe('FinanceService Unit Tests', () => {
 
     mockNotifications = {
       create: jest.fn().mockResolvedValue(undefined),
+      emitRealtimeNotification: jest.fn(),
     };
 
     service = new FinanceService(
@@ -64,10 +68,12 @@ describe('FinanceService Unit Tests', () => {
         parentId: 'p1',
         childId: 'c1',
         amount: 200_000,
+        method: PaymentMethod.CASH,
         idempotencyKey: 'idem-key-123',
       };
 
       mockPrisma.payment.findUnique.mockResolvedValue(existingPayment);
+      mockPrisma.parent.findFirst.mockResolvedValue({ id: 'p1', userId: 'parent-user-id' });
 
       const result = await service.recordPayment(
         {
@@ -88,6 +94,7 @@ describe('FinanceService Unit Tests', () => {
 
     it('creates Payment and atomic Transaction with idempotencyKey if new', async () => {
       mockPrisma.payment.findUnique.mockResolvedValue(null);
+      mockPrisma.parent.findFirst.mockResolvedValue({ id: 'p1', userId: 'parent-user-id' });
       mockPrisma.childParent.findUnique.mockResolvedValue({
         id: 'cp-1',
         parent: { userId: 'parent-user-id' },
@@ -127,9 +134,99 @@ describe('FinanceService Unit Tests', () => {
         }),
       });
     });
+
+    it('rejects an invalid parent-child relation before writing payment, ledger, or notification', async () => {
+      mockPrisma.parent.findFirst.mockResolvedValue({ id: 'p1', userId: 'parent-user-id' });
+      mockPrisma.payment.findUnique.mockResolvedValue(null);
+      mockPrisma.childParent.findUnique.mockResolvedValue(null);
+
+      await expect(service.recordPayment({
+        parentId: 'p1',
+        childId: 'unrelated-child',
+        amount: 150_000,
+        method: PaymentMethod.CASH,
+        idempotencyKey: 'invalid-relation-key',
+      }, 'admin-user-id')).rejects.toThrow(BadRequestException);
+
+      expect(mockPrisma.payment.create).not.toHaveBeenCalled();
+      expect(mockPrisma.transaction.create).not.toHaveBeenCalled();
+      expect(mockNotifications.create).not.toHaveBeenCalled();
+    });
+
+    it('does not create a success notification when the ledger write fails', async () => {
+      mockPrisma.parent.findFirst.mockResolvedValue({ id: 'p1', userId: 'parent-user-id' });
+      mockPrisma.payment.findUnique.mockResolvedValue(null);
+      mockPrisma.childParent.findUnique.mockResolvedValue({
+        id: 'cp-1',
+        parent: { userId: 'parent-user-id' },
+      });
+      mockPrisma.payment.create.mockResolvedValue({ id: 'payment-1' });
+      mockPrisma.transaction.create.mockRejectedValue(new Error('ledger unavailable'));
+
+      await expect(service.recordPayment({
+        parentId: 'p1',
+        childId: 'c1',
+        amount: 150_000,
+        method: PaymentMethod.CASH,
+        idempotencyKey: 'ledger-failure-key',
+      }, 'admin-user-id')).rejects.toThrow('ledger unavailable');
+
+      expect(mockNotifications.create).not.toHaveBeenCalled();
+      expect(mockNotifications.emitRealtimeNotification).not.toHaveBeenCalled();
+    });
+
+    it('retries a serializable conflict and succeeds without duplicate writes', async () => {
+      let attempts = 0;
+      mockPrisma.$transaction.mockImplementation(async (cb: any) => {
+        attempts += 1;
+        if (attempts < 3) throw Object.assign(new Error('serialization conflict'), { code: 'P2034' });
+        return cb(mockPrisma);
+      });
+      mockPrisma.parent.findFirst.mockResolvedValue({ id: 'p1', userId: 'parent-user-id' });
+      mockPrisma.payment.findUnique.mockResolvedValue(null);
+      mockPrisma.childParent.findUnique.mockResolvedValue({
+        id: 'cp-1',
+        parent: { userId: 'parent-user-id' },
+      });
+      mockPrisma.payment.create.mockResolvedValue({
+        id: 'payment-retry',
+        parentId: 'p1',
+        childId: 'c1',
+        amount: 150_000,
+        method: PaymentMethod.CASH,
+      });
+
+      await expect(service.recordPayment({
+        parentId: 'p1',
+        childId: 'c1',
+        amount: 150_000,
+        method: PaymentMethod.CASH,
+        idempotencyKey: 'retry-payment-key',
+      }, 'admin-user-id')).resolves.toEqual(expect.objectContaining({ id: 'payment-retry' }));
+
+      expect(attempts).toBe(3);
+      expect(mockPrisma.payment.create).toHaveBeenCalledTimes(1);
+    });
   });
 
   describe('Refunds', () => {
+    it('rejects reuse of a refund idempotency key with a different amount', async () => {
+      mockPrisma.transaction.findUnique.mockResolvedValue({
+        id: 'refund-existing',
+        amount: 10_000,
+        description: 'Refund for payment pay-1: Original request',
+      });
+
+      await expect(service.refund('pay-1', {
+        amount: 20_000,
+        note: 'Changed request',
+        idempotencyKey: 'refund-reused-key',
+      }, 'admin-id')).rejects.toThrow(ConflictException);
+
+      expect(mockPrisma.transaction.create).not.toHaveBeenCalled();
+      expect(mockNotifications.create).not.toHaveBeenCalled();
+    });
+
     it('throws BadRequestException if refund exceeds original payment amount', async () => {
       mockPrisma.payment.findUnique.mockResolvedValue({
         id: 'pay-1',
@@ -144,7 +241,7 @@ describe('FinanceService Unit Tests', () => {
 
       // Requesting 30k refund (80k + 30k = 110k > 100k)
       await expect(
-        service.refund('pay-1', { amount: 30_000, note: 'Too much' }, 'admin-id'),
+        service.refund('pay-1', { amount: 30_000, note: 'Too much', idempotencyKey: 'refund-key-1' }, 'admin-id'),
       ).rejects.toThrow(BadRequestException);
     });
 
@@ -169,7 +266,7 @@ describe('FinanceService Unit Tests', () => {
       };
       mockPrisma.transaction.create.mockResolvedValue(refundTx);
 
-      const res = await service.refund('pay-1', { amount: 50_000, note: 'Partial refund' }, 'admin-id');
+      const res = await service.refund('pay-1', { amount: 50_000, note: 'Partial refund', idempotencyKey: 'refund-key-2' }, 'admin-id');
       expect(res).toEqual(refundTx);
       expect(mockPrisma.transaction.create).toHaveBeenCalledWith({
         data: expect.objectContaining({
@@ -191,22 +288,40 @@ describe('FinanceService Unit Tests', () => {
         { parentId: 'p-2', direction: TransactionDirection.OUT, _sum: { amount: 100_000 } },
       ]);
       mockPrisma.parent.findMany = jest.fn().mockResolvedValue([
-        { id: 'p-1', user: { fullName: 'Ali Valiyev', phone: '+998901234567' } },
+        {
+          id: 'p-1',
+          user: { fullName: 'Ali Valiyev', phone: '+998901234567' },
+          children: [{ child: { id: 'c-1', firstName: 'Umar', lastName: 'Valiyev' } }],
+        },
       ]);
 
       const debtors = await service.allDebtors();
       expect(mockPrisma.transaction.groupBy).toHaveBeenCalledWith(
         expect.objectContaining({
-          by: ['parentId', 'direction'],
+          by: ['parentId', 'childId', 'direction'],
           _sum: { amount: true },
         }),
       );
       expect(debtors).toHaveLength(1);
-      expect(debtors[0]).toEqual({
-        parentId: 'p-1',
-        debt: 150_000,
-        parent: { id: 'p-1', user: { fullName: 'Ali Valiyev', phone: '+998901234567' } },
+      expect(debtors[0]).toEqual(expect.objectContaining({
+        parentId: 'p-1', debt: 150_000,
+        children: [expect.objectContaining({ id: 'c-1', fullName: 'Umar Valiyev' })],
+      }));
+    });
+  });
+
+  describe('Payment relation presentation', () => {
+    it('returns explicit payer and child identities for payment details', async () => {
+      mockPrisma.payment.findUnique.mockResolvedValue({
+        id: 'payment-1',
+        parent: { id: 'parent-1', user: { fullName: 'Ali Valiyev', phone: '+998901234567' } },
+        child: { id: 'child-1', firstName: 'Umar', lastName: 'Valiyev' },
       });
+
+      await expect(service.paymentById('payment-1')).resolves.toEqual(expect.objectContaining({
+        payer: { id: 'parent-1', fullName: 'Ali Valiyev', phone: '+998901234567' },
+        child: expect.objectContaining({ id: 'child-1', fullName: 'Umar Valiyev' }),
+      }));
     });
   });
 
@@ -250,5 +365,34 @@ describe('FinanceService Unit Tests', () => {
         }),
       );
     });
+  });
+});
+
+describe('RecordPaymentDto validation', () => {
+  const valid = {
+    parentId: 'a8098c1a-f86e-11da-bd1a-00112444be1e',
+    childId: 'b8098c1a-f86e-11da-bd1a-00112444be1e',
+    amount: 150_000,
+    method: PaymentMethod.CASH,
+    idempotencyKey: 'payment-request-1',
+  };
+
+  it('accepts a valid whole-UZS payment including the documented maximum', async () => {
+    const dto = Object.assign(new RecordPaymentDto(), valid, { amount: 2_000_000_000 });
+    await expect(validate(dto)).resolves.toHaveLength(0);
+  });
+
+  it.each([
+    ['parentId', { parentId: 'not-a-uuid' }],
+    ['childId', { childId: 'not-a-uuid' }],
+    ['amount', { amount: 0 }],
+    ['amount', { amount: -1 }],
+    ['amount', { amount: 2_000_000_001 }],
+    ['method', { method: 'BITCOIN' }],
+    ['idempotencyKey', { idempotencyKey: 'short' }],
+  ])('rejects an invalid %s', async (property, override) => {
+    const dto = Object.assign(new RecordPaymentDto(), valid, override);
+    const errors = await validate(dto);
+    expect(errors.some((error) => error.property === property)).toBe(true);
   });
 });

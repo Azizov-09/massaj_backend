@@ -14,10 +14,12 @@
     "test": "jest --config jest.config.cjs --runInBand",
     "test:watch": "jest --watch",
     "test:e2e": "jest --config ./test/jest-e2e.json --runInBand",
+    "test:e2e:isolated": "ts-node src/database/run-isolated-e2e.ts",
     "prisma:generate": "prisma generate",
     "prisma:validate": "prisma validate",
     "prisma:migrate": "prisma migrate dev",
     "prisma:deploy": "prisma migrate deploy",
+    "audit:data-integrity": "ts-node src/database/data-integrity.audit.ts",
     "seed": "ts-node prisma/seed.ts",
     "db:seed": "prisma db seed"
   },

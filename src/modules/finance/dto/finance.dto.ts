@@ -4,7 +4,7 @@ import { Type } from 'class-transformer';
 import { IsDateString, IsEnum, IsInt, IsOptional, IsString, IsUUID, Length, Max, Min } from 'class-validator';
 
 export class RecordPaymentDto {
-  @ApiProperty({ description: 'Parent paying UUID' })
+  @ApiProperty({ description: 'Parent profile UUID (a User UUID is also resolved for backward compatibility)' })
   @IsUUID()
   parentId!: string;
 
@@ -12,7 +12,7 @@ export class RecordPaymentDto {
   @IsUUID()
   childId!: string;
 
-  @ApiProperty({ description: 'Payment amount in smallest currency unit (e.g. tiyin)' })
+  @ApiProperty({ description: 'Positive whole amount in UZS; do not multiply by 100' })
   @Type(() => Number)
   @IsInt()
   @Min(1)
@@ -34,15 +34,14 @@ export class RecordPaymentDto {
   @IsDateString()
   paidAt?: string;
 
-  @ApiPropertyOptional({ description: 'Unique idempotency key to prevent double charge' })
-  @IsOptional()
+  @ApiProperty({ description: 'Client-generated unique idempotency key; reuse only when retrying the same request' })
   @IsString()
   @Length(8, 255)
-  idempotencyKey?: string;
+  idempotencyKey!: string;
 }
 
 export class RefundDto {
-  @ApiProperty({ description: 'Refund amount in smallest currency unit' })
+  @ApiProperty({ description: 'Positive whole refund amount in UZS; do not multiply by 100' })
   @Type(() => Number)
   @IsInt()
   @Min(1)
@@ -54,6 +53,11 @@ export class RefundDto {
   @IsString()
   @Length(1, 1000)
   note?: string;
+
+  @ApiProperty({ description: 'Client-generated unique idempotency key for this refund request' })
+  @IsString()
+  @Length(8, 255)
+  idempotencyKey!: string;
 }
 
 export class FinanceQueryDto {
@@ -92,7 +96,7 @@ export class FinanceQueryDto {
 }
 
 export class RecordChargeDto {
-  @ApiProperty({ description: 'Parent UUID responsible for payment' })
+  @ApiProperty({ description: 'Parent profile UUID responsible for payment' })
   @IsUUID()
   parentId!: string;
 
@@ -112,4 +116,9 @@ export class RecordChargeDto {
   @IsString()
   @Length(2, 500)
   description!: string;
+
+  @ApiProperty({ description: 'Client-generated unique idempotency key for this charge request' })
+  @IsString()
+  @Length(8, 255)
+  idempotencyKey!: string;
 }

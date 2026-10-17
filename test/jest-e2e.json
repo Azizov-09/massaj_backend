@@ -3,8 +3,9 @@
   "rootDir": ".",
   "testRegex": ".e2e-spec.ts$",
   "transform": {
-    "^.+\\.(t|j)s$": ["ts-jest", { "tsconfig": "tsconfig.json", "isolatedModules": true }]
+    "^.+\\.(t|j)s$": ["ts-jest", { "tsconfig": "tsconfig.json" }]
   },
+  "setupFiles": ["<rootDir>/setup-e2e-env.ts"],
   "testEnvironment": "node",
   "testTimeout": 60000
 }

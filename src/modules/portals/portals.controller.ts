@@ -46,14 +46,6 @@ export class PortalsController {
   }
 
   @Roles(Role.PARENT)
-  @Get('parent/my-goals')
-  @ApiOperation({ summary: 'Parent Portal: My Children Goals' })
-  @ApiResponse({ status: 200, description: 'Rehabilitation goals for parent children.' })
-  goals(@CurrentUser() user: RequestUser) {
-    return this.portals.parentGoals(user.id);
-  }
-
-  @Roles(Role.PARENT)
   @Get('parent/my-payments')
   @ApiOperation({ summary: 'Parent Portal: My Payment History' })
   @ApiResponse({ status: 200, description: 'Payment records made by parent.' })
@@ -112,11 +104,4 @@ export class PortalsController {
     return this.portals.specialistProgress(user.id);
   }
 
-  @Roles(Role.SPECIALIST)
-  @Get('specialist/my-goals')
-  @ApiOperation({ summary: 'Specialist Portal: Managed Therapeutic Goals' })
-  @ApiResponse({ status: 200, description: 'Goals managed by specialist.' })
-  specialistGoals(@CurrentUser() user: RequestUser) {
-    return this.portals.specialistGoals(user.id);
-  }
 }

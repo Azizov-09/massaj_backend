@@ -8,5 +8,45 @@ export interface OutboxJob { eventId: string; }
 @Injectable()
 export class OutboxService {
   constructor(private readonly prisma: PrismaService, @InjectQueue('outbox') private readonly queue: Queue<OutboxJob>) {}
-  @Cron('* * * * *') async dispatchPending(): Promise<void> { const events = await this.prisma.outboxEvent.findMany({ where: { status: OutboxStatus.PENDING, availableAt: { lte: new Date() } }, select: { id: true }, orderBy: { createdAt: 'asc' }, take: 100 }); for (const event of events) { const claimed = await this.prisma.outboxEvent.updateMany({ where: { id: event.id, status: OutboxStatus.PENDING }, data: { status: OutboxStatus.PROCESSING, attemptCount: { increment: 1 } } }); if (claimed.count !== 1) continue; try { await this.queue.add('dispatch', { eventId: event.id }, { jobId: event.id, attempts: 3, backoff: { type: 'exponential', delay: 1000 }, removeOnComplete: 500, removeOnFail: 1000 }); } catch (error) { await this.prisma.outboxEvent.update({ where: { id: event.id }, data: { status: OutboxStatus.PENDING, availableAt: new Date(Date.now() + 60_000), lastError: error instanceof Error ? error.message : 'Queue unavailable' } }); } } }
+  @Cron('* * * * *') async dispatchPending(): Promise<void> {
+    const now = new Date();
+    await this.prisma.outboxEvent.updateMany({
+      where: {
+        status: OutboxStatus.PROCESSING,
+        updatedAt: { lt: new Date(now.getTime() - 5 * 60_000) },
+      },
+      data: { status: OutboxStatus.PENDING, availableAt: now, lastError: 'Recovered stale processing claim' },
+    });
+    const events = await this.prisma.outboxEvent.findMany({
+      where: { status: OutboxStatus.PENDING, availableAt: { lte: now } },
+      select: { id: true },
+      orderBy: { createdAt: 'asc' },
+      take: 100,
+    });
+    for (const event of events) {
+      const claimed = await this.prisma.outboxEvent.updateMany({
+        where: { id: event.id, status: OutboxStatus.PENDING },
+        data: { status: OutboxStatus.PROCESSING, attemptCount: { increment: 1 } },
+      });
+      if (claimed.count !== 1) continue;
+      try {
+        await this.queue.add('dispatch', { eventId: event.id }, {
+          jobId: event.id,
+          attempts: 3,
+          backoff: { type: 'exponential', delay: 1000 },
+          removeOnComplete: 500,
+          removeOnFail: 1000,
+        });
+      } catch (error) {
+        await this.prisma.outboxEvent.update({
+          where: { id: event.id },
+          data: {
+            status: OutboxStatus.PENDING,
+            availableAt: new Date(Date.now() + 60_000),
+            lastError: error instanceof Error ? error.message : 'Queue unavailable',
+          },
+        });
+      }
+    }
+  }
 }

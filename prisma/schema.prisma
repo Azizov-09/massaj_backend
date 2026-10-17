@@ -142,6 +142,7 @@ model User {
   announcementsCreated Announcement[] @relation("AnnouncementCreator")
   announcementRecipients AnnouncementRecipient[]
   activityLogs     ActivityLog[]
+  progressEntriesCreated ProgressEntry[] @relation("ProgressCreatedBy")
   @@index([role])
   @@index([status])
   @@index([email])
@@ -264,27 +265,34 @@ model Assessment {
   activityTolerance       String?
   sessionResponse         String?
   professionalObservation String
+  assessedAt              DateTime   @default(now())
   child                   Child      @relation(fields: [childId], references: [id])
   specialist              Specialist @relation(fields: [specialistId], references: [id])
   createdAt               DateTime   @default(now())
   updatedAt               DateTime   @updatedAt
   @@index([childId])
   @@index([specialistId])
+  @@index([assessedAt])
 }
 
 model ProgressEntry {
   id           String     @id @default(uuid()) @db.Uuid
   childId      String     @db.Uuid
   specialistId String     @db.Uuid
+  createdById  String?    @db.Uuid
   title        String     @db.VarChar(200)
   description  String
+  occurredAt   DateTime   @default(now())
   child        Child      @relation(fields: [childId], references: [id])
   specialist   Specialist @relation(fields: [specialistId], references: [id])
+  createdBy    User?      @relation("ProgressCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
   createdAt    DateTime   @default(now())
   updatedAt    DateTime   @updatedAt
   @@index([childId])
   @@index([specialistId])
+  @@index([createdById])
   @@index([createdAt])
+  @@index([occurredAt])
 }
 
 model Goal {

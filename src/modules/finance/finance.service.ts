@@ -9,7 +9,7 @@ import { NotificationType, Prisma, Role, TransactionDirection, TransactionType }
 import { PrismaService } from '../../database/prisma.service';
 import { calculateFinancialState } from '../../common/utils/money.util';
 import { NotificationsService } from '../notifications/notifications.service';
-import { RecordPaymentDto, RefundDto } from './dto/finance.dto';
+import { RecordChargeDto, RecordPaymentDto, RefundDto } from './dto/finance.dto';
 import { RequestUser } from '../../common/types/request-user.type';
 
 
@@ -35,25 +35,42 @@ export class FinanceService {
 
   async recordPayment(dto: RecordPaymentDto, actorId: string) {
     try {
-      const result = await this.prisma.$transaction(async (tx) => {
+      const result = await this.runSerializable(async (tx) => {
+        const parent = await tx.parent.findFirst({
+          where: { OR: [{ id: dto.parentId }, { userId: dto.parentId }] },
+          select: { id: true, userId: true },
+        });
+        if (!parent) throw new NotFoundException('Parent not found');
+
         // Idempotency check
-        if (dto.idempotencyKey) {
-          const duplicate = await tx.payment.findUnique({ where: { idempotencyKey: dto.idempotencyKey } });
-          if (duplicate) return { payment: duplicate, notif: null, parentUserId: null };
+        const duplicate = await tx.payment.findUnique({ where: { idempotencyKey: dto.idempotencyKey } });
+        if (duplicate) {
+          if (
+            duplicate.parentId !== parent.id ||
+            duplicate.childId !== dto.childId ||
+            duplicate.amount !== dto.amount ||
+            duplicate.method !== dto.method ||
+            (duplicate.note ?? null) !== (dto.note ?? null) ||
+            (dto.paidAt !== undefined && duplicate.paidAt.getTime() !== new Date(dto.paidAt).getTime())
+          ) {
+            throw new ConflictException('Idempotency key was already used for a different payment');
+          }
+          return { payment: duplicate, notif: null, parentUserId: null };
         }
         // Verify parent-child relationship
         const relation = await tx.childParent.findUnique({
-          where: { childId_parentId: { childId: dto.childId, parentId: dto.parentId } },
+          where: { childId_parentId: { childId: dto.childId, parentId: parent.id } },
           include: { parent: { select: { userId: true } } },
         });
         if (!relation) throw new BadRequestException('Parent must be related to the child');
 
         const paidAt = dto.paidAt ? new Date(dto.paidAt) : new Date();
         if (Number.isNaN(paidAt.getTime())) throw new BadRequestException('Invalid payment date');
+        if (paidAt.getTime() > Date.now()) throw new BadRequestException('Payment date cannot be in the future');
 
         const payment = await tx.payment.create({
           data: {
-            parentId: dto.parentId,
+            parentId: parent.id,
             childId: dto.childId,
             amount: dto.amount,
             method: dto.method,
@@ -65,16 +82,14 @@ export class FinanceService {
 
         await tx.transaction.create({
           data: {
-            parentId: dto.parentId,
+            parentId: parent.id,
             childId: dto.childId,
             paymentId: payment.id,
             type: TransactionType.PAYMENT,
             direction: TransactionDirection.IN,
             amount: dto.amount,
             description: `Manual ${dto.method.toLowerCase()} payment`,
-            idempotencyKey: dto.idempotencyKey
-              ? `payment:${dto.idempotencyKey}`
-              : `payment:${payment.id}`,
+            idempotencyKey: `payment:${dto.idempotencyKey}`,
           },
         });
 
@@ -102,17 +117,8 @@ export class FinanceService {
           },
         });
 
-        await tx.outboxEvent.create({
-          data: {
-            eventType: 'PAYMENT_RECORDED',
-            aggregateType: 'Payment',
-            aggregateId: payment.id,
-            payload: { paymentId: payment.id },
-          },
-        });
-
         return { payment, notif, parentUserId: relation.parent.userId };
-      }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+      });
 
       // Post-commit side-effect: Broadcast realtime event only after successful commit!
       if (result.notif && result.parentUserId) {
@@ -120,14 +126,43 @@ export class FinanceService {
       }
       return result.payment;
     } catch (error) {
-      if (this.isUnique(error)) throw new ConflictException('Duplicate payment request');
+      if (this.isUnique(error)) {
+        const duplicate = await this.prisma.payment.findUnique({ where: { idempotencyKey: dto.idempotencyKey } });
+        const parent = await this.prisma.parent.findFirst({
+          where: { OR: [{ id: dto.parentId }, { userId: dto.parentId }] },
+          select: { id: true },
+        });
+        if (
+          duplicate &&
+          parent &&
+          duplicate.parentId === parent.id &&
+          duplicate.childId === dto.childId &&
+          duplicate.amount === dto.amount &&
+          duplicate.method === dto.method &&
+          (duplicate.note ?? null) === (dto.note ?? null) &&
+          (dto.paidAt === undefined || duplicate.paidAt.getTime() === new Date(dto.paidAt).getTime())
+        ) {
+          return duplicate;
+        }
+        throw new ConflictException('Duplicate payment request');
+      }
       throw error;
     }
   }
 
   async refund(paymentId: string, dto: RefundDto, actorId: string) {
     try {
-      const result = await this.prisma.$transaction(async (tx) => {
+      const result = await this.runSerializable(async (tx) => {
+        const requestKey = `refund:${paymentId}:${dto.idempotencyKey}`;
+        const duplicate = await tx.transaction.findUnique({ where: { idempotencyKey: requestKey } });
+        if (duplicate) {
+          const expectedDescription = `Refund for payment ${paymentId}${dto.note ? `: ${dto.note}` : ''}`;
+          if (duplicate.amount !== dto.amount || duplicate.description !== expectedDescription) {
+            throw new ConflictException('Idempotency key was already used for a different refund');
+          }
+          return { refund: duplicate, notif: null, parentUserId: null };
+        }
+
         const payment = await tx.payment.findUnique({
           where: { id: paymentId },
           include: { parent: { select: { userId: true } } },
@@ -159,7 +194,7 @@ export class FinanceService {
             direction: TransactionDirection.OUT,
             amount: dto.amount,
             description: `Refund for payment ${payment.id}${dto.note ? `: ${dto.note}` : ''}`,
-            idempotencyKey: `refund:${payment.id}:${alreadyRefunded + dto.amount}`,
+            idempotencyKey: requestKey,
           },
         });
 
@@ -187,17 +222,8 @@ export class FinanceService {
           },
         });
 
-        await tx.outboxEvent.create({
-          data: {
-            eventType: 'PAYMENT_REFUNDED',
-            aggregateType: 'Payment',
-            aggregateId: payment.id,
-            payload: { paymentId: payment.id, transactionId: refund.id },
-          },
-        });
-
         return { refund, notif, parentUserId: payment.parent.userId };
-      }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+      });
 
       // Post-commit side-effect: Broadcast realtime event only after successful commit!
       if (result.notif && result.parentUserId) {
@@ -205,22 +231,58 @@ export class FinanceService {
       }
       return result.refund;
     } catch (error) {
-      if (this.isUnique(error)) throw new ConflictException('Duplicate refund request');
+      if (this.isUnique(error)) {
+        const requestKey = `refund:${paymentId}:${dto.idempotencyKey}`;
+        const duplicate = await this.prisma.transaction.findUnique({ where: { idempotencyKey: requestKey } });
+        const expectedDescription = `Refund for payment ${paymentId}${dto.note ? `: ${dto.note}` : ''}`;
+        if (
+          duplicate &&
+          duplicate.amount === dto.amount &&
+          duplicate.description === expectedDescription
+        ) {
+          return duplicate;
+        }
+        throw new ConflictException('Duplicate refund request');
+      }
       throw error;
     }
   }
 
-  async recordCharge(dto: { parentId: string; childId?: string; amount: number; description: string }, actorId: string) {
-    const result = await this.prisma.$transaction(async (tx) => {
-      const parent = await tx.parent.findUnique({
-        where: { id: dto.parentId },
+  async recordCharge(dto: RecordChargeDto, actorId: string) {
+    try {
+      const result = await this.runSerializable(async (tx) => {
+      const requestKey = `charge:${dto.idempotencyKey}`;
+      const parent = await tx.parent.findFirst({
+        where: { OR: [{ id: dto.parentId }, { userId: dto.parentId }] },
         include: { user: { select: { id: true, fullName: true } } },
       });
       if (!parent) throw new NotFoundException('Parent not found');
 
+      const duplicate = await tx.transaction.findUnique({ where: { idempotencyKey: requestKey } });
+      if (duplicate) {
+        if (
+          duplicate.parentId !== parent.id ||
+          duplicate.childId !== (dto.childId ?? null) ||
+          duplicate.amount !== dto.amount ||
+          duplicate.description !== dto.description
+        ) {
+          throw new ConflictException('Idempotency key was already used for a different charge');
+        }
+        const rows = await tx.transaction.findMany({
+          where: { parentId: duplicate.parentId },
+          select: { amount: true, direction: true, type: true, parentId: true },
+        });
+        return {
+          chargeTx: duplicate,
+          notif: null,
+          parentUserId: null,
+          finState: calculateFinancialState(rows, duplicate.parentId ?? ''),
+        };
+      }
+
       if (dto.childId) {
         const relation = await tx.childParent.findUnique({
-          where: { childId_parentId: { childId: dto.childId, parentId: dto.parentId } },
+          where: { childId_parentId: { childId: dto.childId, parentId: parent.id } },
         });
         if (!relation) throw new BadRequestException('Child is not related to parent');
       }
@@ -228,22 +290,22 @@ export class FinanceService {
       // Record charge transaction
       const chargeTx = await tx.transaction.create({
         data: {
-          parentId: dto.parentId,
+          parentId: parent.id,
           childId: dto.childId,
           type: TransactionType.SESSION_CHARGE,
           direction: TransactionDirection.OUT,
           amount: dto.amount,
           description: dto.description,
-          idempotencyKey: `charge:${Date.now()}:${Math.random().toString(36).substring(2, 9)}`,
+          idempotencyKey: requestKey,
         },
       });
 
       // Calculate net state of parent inside transaction
       const rows = await tx.transaction.findMany({
-        where: { parentId: dto.parentId },
+        where: { parentId: parent.id },
         select: { amount: true, direction: true, type: true, parentId: true },
       });
-      const finState = calculateFinancialState(rows, dto.parentId);
+      const finState = calculateFinancialState(rows, parent.id);
 
       let notif = null;
       if (finState.debt > 0) {
@@ -274,18 +336,43 @@ export class FinanceService {
       });
 
       return { chargeTx, notif, parentUserId: parent.userId, finState };
-    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+      });
 
     // Post-commit side-effect: Broadcast realtime event only after successful commit!
-    if (result.notif && result.parentUserId) {
-      this.notifications.emitRealtimeNotification(result.parentUserId, result.notif);
-    }
+      if (result.notif && result.parentUserId) {
+        this.notifications.emitRealtimeNotification(result.parentUserId, result.notif);
+      }
 
-    return {
-      transaction: result.chargeTx,
-      balance: result.finState.balance,
-      debt: result.finState.debt,
-    };
+      return {
+        transaction: result.chargeTx,
+        balance: result.finState.balance,
+        debt: result.finState.debt,
+      };
+    } catch (error) {
+      if (this.isUnique(error)) {
+        const requestKey = `charge:${dto.idempotencyKey}`;
+        const [duplicate, parent] = await Promise.all([
+          this.prisma.transaction.findUnique({ where: { idempotencyKey: requestKey } }),
+          this.prisma.parent.findFirst({
+            where: { OR: [{ id: dto.parentId }, { userId: dto.parentId }] },
+            select: { id: true },
+          }),
+        ]);
+        if (
+          duplicate &&
+          parent &&
+          duplicate.parentId === parent.id &&
+          duplicate.childId === (dto.childId ?? null) &&
+          duplicate.amount === dto.amount &&
+          duplicate.description === dto.description
+        ) {
+          const state = await this.stateForParent(parent.id);
+          return { transaction: duplicate, balance: state.balance, debt: state.debt };
+        }
+        throw new ConflictException('Duplicate charge request');
+      }
+      throw error;
+    }
   }
 
   async paymentById(id: string) {
@@ -293,11 +380,11 @@ export class FinanceService {
       where: { id },
       include: {
         parent: { include: { user: { select: { fullName: true, phone: true } } } },
-        child: { select: { firstName: true, lastName: true } },
+        child: { select: { id: true, firstName: true, lastName: true } },
       },
     });
     if (!payment) throw new NotFoundException('Payment not found');
-    return payment;
+    return this.presentPayment(payment);
   }
 
   async transactionById(id: string) {
@@ -322,8 +409,8 @@ export class FinanceService {
       this.prisma.payment.findMany({
         where,
         include: {
-          parent: { include: { user: { select: { fullName: true } } } },
-          child: { select: { firstName: true, lastName: true } },
+          parent: { include: { user: { select: { fullName: true, phone: true } } } },
+          child: { select: { id: true, firstName: true, lastName: true } },
         },
         orderBy: { paidAt: 'desc' },
         skip: (page - 1) * limit,
@@ -331,7 +418,7 @@ export class FinanceService {
       }),
       this.prisma.payment.count({ where }),
     ]);
-    return { items, meta: { page, limit, total, totalPages: Math.ceil(total / limit) } };
+    return { items: items.map((item) => this.presentPayment(item)), meta: { page, limit, total, totalPages: Math.ceil(total / limit) } };
   }
 
   async transactions(parentId?: string, childId?: string, page = 1, limit = 50, from?: string, to?: string) {
@@ -368,18 +455,23 @@ export class FinanceService {
 
   async allDebtors() {
     const grouped = await this.prisma.transaction.groupBy({
-      by: ['parentId', 'direction'],
+      by: ['parentId', 'childId', 'direction'],
       where: { type: { not: TransactionType.EXPENSE }, parentId: { not: null } },
       _sum: { amount: true },
       orderBy: { parentId: 'asc' },
     });
     const netByParent = new Map<string, number>();
+    const netByChild = new Map<string, number>();
     for (const row of grouped) {
       if (!row.parentId) continue;
       const amount = row._sum?.amount ?? 0;
       const current = netByParent.get(row.parentId) ?? 0;
       const delta = row.direction === TransactionDirection.IN ? amount : -amount;
       netByParent.set(row.parentId, current + delta);
+      if (row.childId) {
+        const childKey = `${row.parentId}:${row.childId}`;
+        netByChild.set(childKey, (netByChild.get(childKey) ?? 0) + delta);
+      }
     }
     const debtorIds = Array.from(netByParent.entries())
       .filter(([, net]) => net < 0)
@@ -389,17 +481,24 @@ export class FinanceService {
     // Enrich with parent user info
     const parents = await this.prisma.parent.findMany({
       where: { id: { in: debtorIds.map((d) => d.parentId) } },
-      include: { user: { select: { fullName: true, phone: true } } },
+      include: {
+        user: { select: { fullName: true, phone: true } },
+        children: { include: { child: { select: { id: true, firstName: true, lastName: true } } } },
+      },
     });
     const parentMap = new Map(parents.map((p) => [p.id, p]));
-    return debtorIds.map((d) => ({
-      ...d,
-      parent: parentMap.get(d.parentId),
-    }));
+    return debtorIds.map((d) => {
+      const parent = parentMap.get(d.parentId);
+      const children = (parent?.children ?? []).map(({ child }) => {
+        const net = netByChild.get(`${d.parentId}:${child.id}`) ?? 0;
+        return { ...child, fullName: `${child.firstName} ${child.lastName}`.trim(), debt: Math.max(0, -net) };
+      });
+      return { ...d, parent, children };
+    });
   }
 
   async parentBalance(parentId: string, user: RequestUser) {
-    // PARENT role may only access their own balance
+    this.assertFinancialRole(user);
     if (user.role === Role.PARENT) {
       const parent = await this.prisma.parent.findUnique({ where: { userId: user.id }, select: { id: true } });
       if (!parent || parent.id !== parentId) throw new ForbiddenException('Access denied');
@@ -408,7 +507,7 @@ export class FinanceService {
   }
 
   async financialSummary(parentId: string, user: RequestUser) {
-    // PARENT role may only access their own summary
+    this.assertFinancialRole(user);
     if (user.role === Role.PARENT) {
       const parent = await this.prisma.parent.findUnique({ where: { userId: user.id }, select: { id: true } });
       if (!parent || parent.id !== parentId) throw new ForbiddenException('Access denied');
@@ -430,7 +529,7 @@ export class FinanceService {
   }
 
   async stateForChild(childId: string, user: RequestUser) {
-    // PARENT can only see children they own
+    this.assertFinancialRole(user);
     if (user.role === Role.PARENT) {
       const parentProfile = await this.prisma.parent.findUnique({ where: { userId: user.id }, select: { id: true } });
       if (!parentProfile) throw new ForbiddenException('Parent profile not found');
@@ -454,5 +553,48 @@ export class FinanceService {
     return (
       typeof error === 'object' && error !== null && 'code' in error && error.code === 'P2002'
     );
+  }
+
+  private isSerializationConflict(error: unknown): boolean {
+    return typeof error === 'object' && error !== null && 'code' in error && error.code === 'P2034';
+  }
+
+  private async runSerializable<T>(operation: (tx: Prisma.TransactionClient) => Promise<T>): Promise<T> {
+    const maxAttempts = 3;
+    for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+      try {
+        return await this.prisma.$transaction(operation, {
+          isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
+        });
+      } catch (error) {
+        if (!this.isSerializationConflict(error) || attempt === maxAttempts) throw error;
+      }
+    }
+    throw new Error('Serializable transaction retry exhausted');
+  }
+
+  private assertFinancialRole(user: RequestUser): void {
+    const allowedRoles: Role[] = [Role.SUPER_ADMIN, Role.ADMIN, Role.PARENT];
+    if (!allowedRoles.includes(user.role)) {
+      throw new ForbiddenException('Financial data is restricted to administrators and the owning parent');
+    }
+  }
+
+  private presentPayment<T extends {
+    parent: { id: string; user: { fullName: string; phone: string } };
+    child: { id: string; firstName: string; lastName: string };
+  }>(payment: T) {
+    return {
+      ...payment,
+      payer: {
+        id: payment.parent.id,
+        fullName: payment.parent.user.fullName,
+        phone: payment.parent.user.phone,
+      },
+      child: {
+        ...payment.child,
+        fullName: `${payment.child.firstName} ${payment.child.lastName}`.trim(),
+      },
+    };
   }
 }

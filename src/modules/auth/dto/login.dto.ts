@@ -1,5 +1,5 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { IsString, Length, Matches } from 'class-validator';
+import { IsOptional, IsString, Length, Matches } from 'class-validator';
 
 export class LoginDto {
   @ApiProperty({
@@ -22,9 +22,10 @@ export class RefreshDto {
   @ApiProperty({
     description: 'Cryptographic refresh token string',
   })
+  @IsOptional()
   @IsString()
   @Length(20, 4096)
-  refreshToken!: string;
+  refreshToken?: string;
 }
 
 export class ChangePasswordDto {

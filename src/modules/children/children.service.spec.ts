@@ -104,7 +104,6 @@ describe('ChildrenService Unit Tests', () => {
                 OR: [
                   { attendances: { some: { specialist: { userId: 'spec-u1' } } } },
                   { assessments: { some: { specialist: { userId: 'spec-u1' } } } },
-                  { goals: { some: { specialist: { userId: 'spec-u1' } } } },
                   { progressEntries: { some: { specialist: { userId: 'spec-u1' } } } },
                 ],
               },
