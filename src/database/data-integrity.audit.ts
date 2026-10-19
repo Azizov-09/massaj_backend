@@ -54,8 +54,31 @@ const checks: DiagnosticCheck[] = [
       FROM "Payment" p
       LEFT JOIN "Transaction" t ON t."paymentId" = p."id" AND t."type" = 'PAYMENT'
       GROUP BY p."id", p."amount"
-      HAVING COUNT(t."id") <> 1 OR COALESCE(SUM(t."amount"), 0) <> p."amount"
+      HAVING COUNT(t."id") <> 1
+        OR COALESCE(SUM(t."amount"), 0) <> p."amount"
+        OR COUNT(t."id") FILTER (
+          WHERE t."parentId" IS DISTINCT FROM p."parentId"
+            OR t."childId" IS DISTINCT FROM p."childId"
+            OR t."direction" <> 'IN'
+        ) > 0
       ORDER BY p."id" LIMIT 100`,
+  },
+  {
+    name: 'orphanPaymentLedgerRows',
+    description: 'PAYMENT ledger rows without a valid matching Payment or with mismatched ownership/amount.',
+    query: Prisma.sql`
+      SELECT t."id"::text AS identifier, COUNT(*) OVER()::int AS total
+      FROM "Transaction" t
+      LEFT JOIN "Payment" p ON p."id" = t."paymentId"
+      WHERE t."type" = 'PAYMENT'
+        AND (
+          p."id" IS NULL
+          OR t."parentId" IS DISTINCT FROM p."parentId"
+          OR t."childId" IS DISTINCT FROM p."childId"
+          OR t."amount" IS DISTINCT FROM p."amount"
+          OR t."direction" <> 'IN'
+        )
+      ORDER BY t."id" LIMIT 100`,
   },
   {
     name: 'invalidFinancialAmounts',
@@ -142,6 +165,9 @@ async function main(): Promise<void> {
       WHERE table_schema = 'public'
         AND ((table_name = 'Assessment' AND column_name = 'assessedAt')
           OR (table_name = 'ProgressEntry' AND column_name = 'occurredAt'))`);
+    const goalState = await prisma.$queryRaw<Array<{ exists: boolean }>>(Prisma.sql`
+      SELECT to_regclass('"Goal"') IS NOT NULL AS "exists"`);
+    const goalTableExists = goalState[0]?.exists === true;
     const hasAssessedAt = clinicalColumns.some(
       (column) => column.tableName === 'Assessment' && column.columnName === 'assessedAt',
     );
@@ -156,11 +182,19 @@ async function main(): Promise<void> {
         SELECT ('progress:' || "id"::text) AS identifier FROM "ProgressEntry" WHERE "createdAt" > NOW()
       ) issue
       ORDER BY issue.identifier LIMIT 100`;
-    const effectiveChecks = checks.map((check) =>
-      check.name === 'futureClinicalRecords' && (!hasAssessedAt || !hasOccurredAt)
-        ? { ...check, query: legacyFutureClinicalQuery }
-        : check,
-    );
+    const effectiveChecks = checks.map((check) => {
+      if (check.name === 'futureClinicalRecords' && (!hasAssessedAt || !hasOccurredAt)) {
+        return { ...check, query: legacyFutureClinicalQuery };
+      }
+      if (check.name === 'goalsPendingArchive' && !goalTableExists) {
+        return {
+          ...check,
+          description: 'Retired Goal table is absent.',
+          query: Prisma.sql`SELECT NULL::text AS identifier, 0::int AS total WHERE FALSE`,
+        };
+      }
+      return check;
+    });
     const results: Array<Record<string, unknown> & { status: string; total: number }> = [{
       check: 'clinicalTimestampMigrationState',
       description: 'Required assessedAt and occurredAt database columns are deployed.',

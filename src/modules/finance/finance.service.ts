@@ -263,6 +263,7 @@ export class FinanceService {
         if (
           duplicate.parentId !== parent.id ||
           duplicate.childId !== (dto.childId ?? null) ||
+          duplicate.appointmentId !== (dto.appointmentId ?? null) ||
           duplicate.amount !== dto.amount ||
           duplicate.description !== dto.description
         ) {
@@ -287,11 +288,30 @@ export class FinanceService {
         if (!relation) throw new BadRequestException('Child is not related to parent');
       }
 
+      if (dto.appointmentId) {
+        if (!dto.childId) throw new BadRequestException('childId is required when appointmentId is provided');
+        const appointment = await tx.appointment.findUnique({
+          where: { id: dto.appointmentId },
+          include: { service: { select: { price: true } } },
+        });
+        if (!appointment) throw new NotFoundException('Appointment not found');
+        if (appointment.parentId !== parent.id || appointment.childId !== dto.childId) {
+          throw new BadRequestException('Appointment does not belong to the supplied parent and child');
+        }
+        if (appointment.status !== 'COMPLETED') {
+          throw new BadRequestException('Only a completed appointment can be charged');
+        }
+        if (appointment.service.price !== dto.amount) {
+          throw new BadRequestException('Charge amount must match the appointment service price');
+        }
+      }
+
       // Record charge transaction
       const chargeTx = await tx.transaction.create({
         data: {
           parentId: parent.id,
           childId: dto.childId,
+          appointmentId: dto.appointmentId,
           type: TransactionType.SESSION_CHARGE,
           direction: TransactionDirection.OUT,
           amount: dto.amount,
@@ -363,6 +383,7 @@ export class FinanceService {
           parent &&
           duplicate.parentId === parent.id &&
           duplicate.childId === (dto.childId ?? null) &&
+          duplicate.appointmentId === (dto.appointmentId ?? null) &&
           duplicate.amount === dto.amount &&
           duplicate.description === dto.description
         ) {
@@ -542,9 +563,13 @@ export class FinanceService {
     const child = await this.prisma.child.findUnique({ where: { id: childId }, select: { id: true } });
     if (!child) throw new NotFoundException('Child not found');
     const relations = await this.prisma.childParent.findMany({ where: { childId }, select: { parentId: true } });
-    const values = await Promise.all(
-      relations.map(async ({ parentId }) => ({ parentId, ...(await this.stateForParent(parentId)) })),
-    );
+    const values = await Promise.all(relations.map(async ({ parentId }) => {
+      const rows = await this.prisma.transaction.findMany({
+        where: { parentId, childId },
+        select: { amount: true, direction: true, type: true, parentId: true },
+      });
+      return { parentId, ...calculateFinancialState(rows, parentId) };
+    }));
     return values;
   }
 

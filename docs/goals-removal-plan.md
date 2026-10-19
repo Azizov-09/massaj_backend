@@ -1,31 +1,41 @@
-# Goals Module Removal Plan
+# Goals Removal, Backup, and Rollback Plan
 
 ## Current state
 
-Runtime Goals endpoints, DTOs, service methods, portal queries, and seed creation have been removed. The `Goal` table, `GoalStatus` enum, and Prisma relations remain intentionally present so historical data is not destroyed without approval.
+Runtime Goals controllers, DTOs, service methods, portal queries, seed creation, Prisma model/relations, and `GoalStatus` are removed. The destructive database change is isolated in `20261018091000_remove_goals`; appointment and finance DDL live in the preceding non-destructive migration.
 
-## Pre-migration read-only checks
+The Goals migration fails closed while even one `Goal` row remains. Fresh databases and approved development resets reach it with an empty Goal table and can proceed normally.
 
-1. Run `npm run audit:data-integrity` against staging with a read-only database account.
-2. Record Goal row count and verify every Goal points to an existing Child and Specialist.
-3. Confirm no application, report, external integration, or direct SQL consumer reads `Goal`.
-4. Export historical Goal rows with checksums to approved encrypted storage.
-5. Obtain written approval naming the environment, row count, backup location, maintenance window, and rollback owner.
+## Development/test execution
 
-## Proposed destructive migration — not created or approved
+1. Run `npm run audit:data-integrity` and confirm the target is localhost and seed-only.
+2. Obtain the data owner's confirmation that no real records must survive.
+3. Set the three one-shot process variables; never commit them as enabled:
+   - `ALLOW_DATABASE_RESET=true`
+   - `CONFIRM_SEED_ONLY_DATA=true`
+   - `CONFIRM_DATABASE_NAME=<exact database name>`
+4. Run `npm run db:reset:development`.
+5. The command exports Goal rows to `.local-backups/`, writes a SHA-256 sidecar, re-reads and verifies the backup, resets migrations, seeds twice, and compares both verified summaries.
+6. Run migration status, integrity audit, and isolated E2E again.
 
-After approval only:
+The local JSON export is development-only and is excluded from Git. It is not an acceptable production backup.
 
-1. Create an immutable `GoalArchive` table or approved external archive.
-2. Copy all Goal rows and verify source/archive counts and checksums.
-3. Deploy runtime code without Goals dependencies and observe for at least one release window.
-4. Drop `Goal` foreign keys, indexes, table, `GoalStatus`, and Prisma relations in a dedicated migration.
-5. Run clinical, children, attendance, portal, analytics, and report regression suites.
+## Production/staging approval gate
+
+Do not use the reset command outside localhost. Before deleting any non-empty Goals dataset:
+
+1. Take a PostgreSQL point-in-time/full backup and verify restoration in a separate environment.
+2. Export the `Goal` table with schema metadata to approved encrypted storage.
+3. Record environment, row count, backup URI, checksum, approver, operator, and maintenance window.
+4. Verify no application, report, integration, or direct SQL consumer reads Goals.
+5. Deploy the Goals-free runtime and observe it for one release window.
+6. With explicit approval, archive and clear the Goal rows, then run `prisma migrate deploy`.
+7. Re-run the 12-check integrity audit and clinical/children/attendance/portal/analytics/report regression suites.
+
+If rows were not cleared, the migration raises an exception and the transaction rolls back without dropping the table or enum.
 
 ## Rollback
 
-Before the destructive migration, retain a point-in-time database backup. Rollback recreates the enum/table/indexes/foreign keys, restores archived rows, verifies row counts/checksums, then redeploys the previous compatible application version. A rollback must not invent or silently discard historical clinical data.
+Preferred rollback is PostgreSQL point-in-time restore to a new database, verification of row counts/checksums and foreign keys, then traffic cutover plus redeployment of the previous compatible application.
 
-## Approval gate
-
-The destructive migration must not be generated, applied, or deployed until the user explicitly approves production data removal. Current completion criterion is therefore: runtime API absent, dependency audit clean, archive/drop plan documented, database data retained.
+If a logical restore is approved instead, recreate `GoalStatus`, `Goal`, its primary key, child/specialist indexes and foreign keys from the original initialization migration; import the encrypted export; verify every Child/Specialist relation and checksum; then deploy the previous schema/client. Never recreate Goals from guessed or partial business data.

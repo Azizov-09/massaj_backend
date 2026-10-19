@@ -7,68 +7,83 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-enum Role { 
+enum Role {
   SUPER_ADMIN
   ADMIN
   SPECIALIST
   PARENT
 }
-enum UserStatus { 
+
+enum UserStatus {
   ACTIVE
   INACTIVE
   BLOCKED
 }
-enum ChildStatus { 
+
+enum ChildStatus {
   ACTIVE
   INACTIVE
   ARCHIVED
 }
-enum Gender { 
+
+enum Gender {
   MALE
   FEMALE
 }
-enum SpecialistStatus { 
+
+enum SpecialistStatus {
   ACTIVE
   INACTIVE
   ARCHIVED
 }
+
 enum EmployeeStatus {
   ACTIVE
   INACTIVE
   ARCHIVED
 }
-enum ServiceStatus { 
+
+enum ServiceStatus {
   ACTIVE
   ARCHIVED
 }
-enum AttendanceStatus { 
+
+enum AttendanceStatus {
   PRESENT
   ABSENT
   LATE
   NO_SHOW
 }
-enum GoalStatus { 
-  ACTIVE
+
+enum AppointmentStatus {
+  SCHEDULED
+  CONFIRMED
+  IN_PROGRESS
   COMPLETED
-  PAUSED
+  CANCELLED
+  NO_SHOW
 }
-enum PaymentMethod { 
+
+enum PaymentMethod {
   CASH
   CARD
   TRANSFER
 }
-enum TransactionType { 
+
+enum TransactionType {
   PAYMENT
   SESSION_CHARGE
   REFUND
   ADJUSTMENT
   EXPENSE
 }
-enum TransactionDirection { 
+
+enum TransactionDirection {
   IN
   OUT
 }
-enum NotificationType { 
+
+enum NotificationType {
   APPOINTMENT
   PAYMENT
   DEBT
@@ -79,39 +94,46 @@ enum NotificationType {
   SYSTEM
   SECURITY
 }
-enum NotificationPriority { 
+
+enum NotificationPriority {
   LOW
   NORMAL
   HIGH
   CRITICAL
 }
-enum NotificationChannel { 
+
+enum NotificationChannel {
   IN_APP
   SMS
 }
-enum NotificationDeliveryStatus { 
+
+enum NotificationDeliveryStatus {
   PENDING
   PROCESSING
   SENT
   FAILED
   CANCELLED
 }
-enum AnnouncementAudience { 
+
+enum AnnouncementAudience {
   ALL_PARENTS
   SPECIFIC_PARENTS
 }
-enum AnnouncementStatus { 
+
+enum AnnouncementStatus {
   DRAFT
   SCHEDULED
   PUBLISHED
   CANCELLED
 }
-enum ConsentType { 
+
+enum ConsentType {
   TREATMENT
   PHOTO_VIDEO
   DATA_PROCESSING
 }
-enum OutboxStatus { 
+
+enum OutboxStatus {
   PENDING
   PROCESSING
   PROCESSED
@@ -119,30 +141,31 @@ enum OutboxStatus {
 }
 
 model User {
-  id               String     @id @default(uuid()) @db.Uuid
-  fullName         String     @db.VarChar(160)
-  phone            String     @unique @db.VarChar(32)
-  email            String?    @db.VarChar(255)
-  passwordHash     String
-  role             Role
-  status           UserStatus @default(ACTIVE)
-  failedLoginCount Int        @default(0)
-  lockedUntil      DateTime?
-  passwordChangedAt DateTime  @default(now())
-  tokenVersion     Int        @default(0)
-  lastLoginAt      DateTime?
-  createdAt        DateTime   @default(now())
-  updatedAt        DateTime   @updatedAt
-  admin            Admin?
-  parent           Parent?
-  specialist       Specialist?
-  sessions         UserSession[]
-  notifications    Notification[]
-  preferences      NotificationPreference?
-  announcementsCreated Announcement[] @relation("AnnouncementCreator")
+  id                     String                  @id @default(uuid()) @db.Uuid
+  fullName               String                  @db.VarChar(160)
+  phone                  String                  @unique @db.VarChar(32)
+  email                  String?                 @db.VarChar(255)
+  passwordHash           String
+  role                   Role
+  status                 UserStatus              @default(ACTIVE)
+  failedLoginCount       Int                     @default(0)
+  lockedUntil            DateTime?
+  passwordChangedAt      DateTime                @default(now())
+  tokenVersion           Int                     @default(0)
+  lastLoginAt            DateTime?
+  createdAt              DateTime                @default(now())
+  updatedAt              DateTime                @updatedAt
+  admin                  Admin?
+  parent                 Parent?
+  specialist             Specialist?
+  sessions               UserSession[]
+  notifications          Notification[]
+  preferences            NotificationPreference?
+  announcementsCreated   Announcement[]          @relation("AnnouncementCreator")
   announcementRecipients AnnouncementRecipient[]
-  activityLogs     ActivityLog[]
-  progressEntriesCreated ProgressEntry[] @relation("ProgressCreatedBy")
+  activityLogs           ActivityLog[]
+  progressEntriesCreated ProgressEntry[]         @relation("ProgressCreatedBy")
+
   @@index([role])
   @@index([status])
   @@index([email])
@@ -157,17 +180,18 @@ model Admin {
 }
 
 model Parent {
-  id        String   @id @default(uuid()) @db.Uuid
-  userId    String   @unique @db.Uuid
-  address   String?  @db.VarChar(500)
-  user      User     @relation(fields: [userId], references: [id])
-  children  ChildParent[]
-  payments  Payment[]
+  id           String        @id @default(uuid()) @db.Uuid
+  userId       String        @unique @db.Uuid
+  address      String?       @db.VarChar(500)
+  user         User          @relation(fields: [userId], references: [id])
+  children     ChildParent[]
+  appointments Appointment[]
+  payments     Payment[]
   transactions Transaction[]
-  documents Document[]
-  consents  Consent[]
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  documents    Document[]
+  consents     Consent[]
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
 }
 
 model Specialist {
@@ -178,35 +202,37 @@ model Specialist {
   bio             String?
   status          SpecialistStatus @default(ACTIVE)
   user            User             @relation(fields: [userId], references: [id])
+  appointments    Appointment[]
   attendances     Attendance[]
   assessments     Assessment[]
   progressEntries ProgressEntry[]
-  goals           Goal[]
   createdAt       DateTime         @default(now())
   updatedAt       DateTime         @updatedAt
+
   @@index([status])
 }
 
 model Child {
-  id          String      @id @default(uuid()) @db.Uuid
-  firstName   String      @db.VarChar(100)
-  lastName    String      @db.VarChar(100)
-  birthDate   DateTime    @db.Date
-  gender      Gender
-  status      ChildStatus @default(ACTIVE)
-  address     String?     @db.VarChar(500)
-  notes       String?
-  parents     ChildParent[]
-  attendances Attendance[]
-  assessments Assessment[]
+  id              String          @id @default(uuid()) @db.Uuid
+  firstName       String          @db.VarChar(100)
+  lastName        String          @db.VarChar(100)
+  birthDate       DateTime        @db.Date
+  gender          Gender
+  status          ChildStatus     @default(ACTIVE)
+  address         String?         @db.VarChar(500)
+  notes           String?
+  parents         ChildParent[]
+  appointments    Appointment[]
+  attendances     Attendance[]
+  assessments     Assessment[]
   progressEntries ProgressEntry[]
-  goals       Goal[]
-  payments    Payment[]
-  transactions Transaction[]
-  documents   Document[]
-  consents    Consent[]
-  createdAt   DateTime    @default(now())
-  updatedAt   DateTime    @updatedAt
+  payments        Payment[]
+  transactions    Transaction[]
+  documents       Document[]
+  consents        Consent[]
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+
   @@index([status])
   @@index([birthDate])
   @@index([createdAt])
@@ -221,6 +247,7 @@ model ChildParent {
   child        Child    @relation(fields: [childId], references: [id])
   parent       Parent   @relation(fields: [parentId], references: [id])
   createdAt    DateTime @default(now())
+
   @@unique([childId, parentId])
   @@index([childId])
   @@index([parentId])
@@ -233,22 +260,57 @@ model Service {
   durationMinutes Int
   price           Int
   status          ServiceStatus @default(ACTIVE)
+  appointments    Appointment[]
   createdAt       DateTime      @default(now())
   updatedAt       DateTime      @updatedAt
+
   @@index([status])
 }
 
+model Appointment {
+  id             String            @id @default(uuid()) @db.Uuid
+  childId        String            @db.Uuid
+  parentId       String            @db.Uuid
+  specialistId   String            @db.Uuid
+  serviceId      String            @db.Uuid
+  startAt        DateTime
+  endAt          DateTime
+  status         AppointmentStatus @default(SCHEDULED)
+  courseKey      String?           @db.VarChar(100)
+  sequenceNumber Int?
+  notes          String?           @db.VarChar(1000)
+  child          Child             @relation(fields: [childId], references: [id])
+  parent         Parent            @relation(fields: [parentId], references: [id])
+  specialist     Specialist        @relation(fields: [specialistId], references: [id])
+  service        Service           @relation(fields: [serviceId], references: [id])
+  attendance     Attendance?
+  transaction    Transaction?
+  createdAt      DateTime          @default(now())
+  updatedAt      DateTime          @updatedAt
+
+  @@unique([courseKey, sequenceNumber])
+  @@unique([specialistId, startAt])
+  @@unique([childId, startAt])
+  @@index([parentId])
+  @@index([serviceId])
+  @@index([status])
+  @@index([startAt])
+}
+
 model Attendance {
-  id           String           @id @default(uuid()) @db.Uuid
-  childId      String           @db.Uuid
-  specialistId String?          @db.Uuid
-  date         DateTime         @default(now())
-  status       AttendanceStatus
-  note         String?
-  child        Child            @relation(fields: [childId], references: [id])
-  specialist   Specialist?      @relation(fields: [specialistId], references: [id])
-  createdAt    DateTime         @default(now())
-  updatedAt    DateTime         @updatedAt
+  id            String           @id @default(uuid()) @db.Uuid
+  childId       String           @db.Uuid
+  specialistId  String?          @db.Uuid
+  appointmentId String?          @unique @db.Uuid
+  date          DateTime         @default(now())
+  status        AttendanceStatus
+  note          String?
+  child         Child            @relation(fields: [childId], references: [id])
+  specialist    Specialist?      @relation(fields: [specialistId], references: [id])
+  appointment   Appointment?     @relation(fields: [appointmentId], references: [id])
+  createdAt     DateTime         @default(now())
+  updatedAt     DateTime         @updatedAt
+
   @@index([childId])
   @@index([specialistId])
   @@index([status])
@@ -270,6 +332,7 @@ model Assessment {
   specialist              Specialist @relation(fields: [specialistId], references: [id])
   createdAt               DateTime   @default(now())
   updatedAt               DateTime   @updatedAt
+
   @@index([childId])
   @@index([specialistId])
   @@index([assessedAt])
@@ -288,6 +351,7 @@ model ProgressEntry {
   createdBy    User?      @relation("ProgressCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
   createdAt    DateTime   @default(now())
   updatedAt    DateTime   @updatedAt
+
   @@index([childId])
   @@index([specialistId])
   @@index([createdById])
@@ -295,36 +359,20 @@ model ProgressEntry {
   @@index([occurredAt])
 }
 
-model Goal {
-  id           String     @id @default(uuid()) @db.Uuid
-  childId      String     @db.Uuid
-  specialistId String     @db.Uuid
-  title        String     @db.VarChar(200)
-  description  String?
-  targetDate   DateTime?  @db.Date
-  status       GoalStatus @default(ACTIVE)
-  progress     Int        @default(0)
-  child        Child      @relation(fields: [childId], references: [id])
-  specialist   Specialist @relation(fields: [specialistId], references: [id])
-  createdAt    DateTime   @default(now())
-  updatedAt    DateTime   @updatedAt
-  @@index([childId])
-  @@index([specialistId])
-}
-
 model Payment {
-  id        String        @id @default(uuid()) @db.Uuid
-  parentId  String        @db.Uuid
-  childId   String        @db.Uuid
-  amount    Int
-  method    PaymentMethod
-  note      String?
-  idempotencyKey String? @unique @db.VarChar(255)
-  paidAt    DateTime
-  parent    Parent        @relation(fields: [parentId], references: [id])
-  child     Child         @relation(fields: [childId], references: [id])
-  transactions Transaction[]
-  createdAt DateTime      @default(now())
+  id             String        @id @default(uuid()) @db.Uuid
+  parentId       String        @db.Uuid
+  childId        String        @db.Uuid
+  amount         Int
+  method         PaymentMethod
+  note           String?
+  idempotencyKey String?       @unique @db.VarChar(255)
+  paidAt         DateTime
+  parent         Parent        @relation(fields: [parentId], references: [id])
+  child          Child         @relation(fields: [childId], references: [id])
+  transactions   Transaction[]
+  createdAt      DateTime      @default(now())
+
   @@index([parentId])
   @@index([childId])
   @@index([paidAt])
@@ -335,15 +383,18 @@ model Transaction {
   parentId       String?              @db.Uuid
   childId        String?              @db.Uuid
   paymentId      String?              @db.Uuid
+  appointmentId  String?              @unique @db.Uuid
   type           TransactionType
   direction      TransactionDirection
   amount         Int
   description    String               @db.VarChar(500)
-  idempotencyKey String?              @unique @db.VarChar(255)
+  idempotencyKey String?              @unique @db.VarChar(512)
   parent         Parent?              @relation(fields: [parentId], references: [id])
   child          Child?               @relation(fields: [childId], references: [id])
   payment        Payment?             @relation(fields: [paymentId], references: [id])
+  appointment    Appointment?         @relation(fields: [appointmentId], references: [id])
   createdAt      DateTime             @default(now())
+
   @@index([parentId])
   @@index([childId])
   @@index([paymentId])
@@ -353,20 +404,21 @@ model Transaction {
 }
 
 model Notification {
-  id              String               @id @default(uuid()) @db.Uuid
-  userId          String               @db.Uuid
+  id              String                 @id @default(uuid()) @db.Uuid
+  userId          String                 @db.Uuid
   type            NotificationType
-  priority        NotificationPriority @default(NORMAL)
-  title           String               @db.VarChar(200)
+  priority        NotificationPriority   @default(NORMAL)
+  title           String                 @db.VarChar(200)
   message         String
-  relatedEntity   String?              @db.VarChar(80)
-  relatedEntityId String?              @db.Uuid
-  dedupeKey       String?              @unique @db.VarChar(255)
+  relatedEntity   String?                @db.VarChar(80)
+  relatedEntityId String?                @db.Uuid
+  dedupeKey       String?                @unique @db.VarChar(255)
   readAt          DateTime?
-  user            User                 @relation(fields: [userId], references: [id])
+  user            User                   @relation(fields: [userId], references: [id])
   deliveries      NotificationDelivery[]
-  createdAt       DateTime             @default(now())
-  updatedAt       DateTime             @updatedAt
+  createdAt       DateTime               @default(now())
+  updatedAt       DateTime               @updatedAt
+
   @@index([userId])
   @@index([type])
   @@index([priority])
@@ -389,6 +441,7 @@ model NotificationDelivery {
   notification      Notification               @relation(fields: [notificationId], references: [id])
   createdAt         DateTime                   @default(now())
   updatedAt         DateTime                   @updatedAt
+
   @@index([notificationId])
   @@index([channel])
   @@index([status])
@@ -416,20 +469,21 @@ model NotificationPreference {
 }
 
 model Announcement {
-  id             String               @id @default(uuid()) @db.Uuid
-  createdByUserId String               @db.Uuid
-  title          String               @db.VarChar(200)
-  message        String
-  audience       AnnouncementAudience
-  sendInApp      Boolean              @default(true)
-  sendSms        Boolean              @default(false)
-  scheduledAt    DateTime?
-  publishedAt    DateTime?
-  status         AnnouncementStatus  @default(DRAFT)
-  creator        User                 @relation("AnnouncementCreator", fields: [createdByUserId], references: [id])
-  recipients     AnnouncementRecipient[]
-  createdAt      DateTime             @default(now())
-  updatedAt      DateTime             @updatedAt
+  id              String                  @id @default(uuid()) @db.Uuid
+  createdByUserId String                  @db.Uuid
+  title           String                  @db.VarChar(200)
+  message         String
+  audience        AnnouncementAudience
+  sendInApp       Boolean                 @default(true)
+  sendSms         Boolean                 @default(false)
+  scheduledAt     DateTime?
+  publishedAt     DateTime?
+  status          AnnouncementStatus      @default(DRAFT)
+  creator         User                    @relation("AnnouncementCreator", fields: [createdByUserId], references: [id])
+  recipients      AnnouncementRecipient[]
+  createdAt       DateTime                @default(now())
+  updatedAt       DateTime                @updatedAt
+
   @@index([status])
   @@index([scheduledAt])
 }
@@ -443,6 +497,7 @@ model AnnouncementRecipient {
   announcement   Announcement @relation(fields: [announcementId], references: [id])
   user           User         @relation(fields: [userId], references: [id])
   createdAt      DateTime     @default(now())
+
   @@unique([announcementId, userId])
   @@index([announcementId])
   @@index([userId])
@@ -459,6 +514,7 @@ model ActivityLog {
   metadata    Json?
   user        User?    @relation(fields: [userId], references: [id])
   createdAt   DateTime @default(now())
+
   @@index([userId])
   @@index([entity])
   @@index([entityId])
@@ -478,6 +534,7 @@ model Document {
   parent    Parent?  @relation(fields: [parentId], references: [id])
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+
   @@index([childId])
 }
 
@@ -492,22 +549,24 @@ model Consent {
   parent    Parent      @relation(fields: [parentId], references: [id])
   createdAt DateTime    @default(now())
   updatedAt DateTime    @updatedAt
+
   @@unique([childId, parentId, type])
   @@index([childId])
   @@index([parentId])
 }
 
 model UserSession {
-  id               String   @id @default(uuid()) @db.Uuid
-  userId           String   @db.Uuid
+  id               String    @id @default(uuid()) @db.Uuid
+  userId           String    @db.Uuid
   refreshTokenHash String
-  device           String?  @db.VarChar(255)
-  ip               String?  @db.VarChar(64)
+  device           String?   @db.VarChar(255)
+  ip               String?   @db.VarChar(64)
   expiresAt        DateTime
   revokedAt        DateTime?
-  user             User     @relation(fields: [userId], references: [id])
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
+  user             User      @relation(fields: [userId], references: [id])
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
   @@index([userId])
   @@index([expiresAt])
   @@index([revokedAt])
@@ -540,6 +599,7 @@ model OutboxEvent {
   lastError     String?
   createdAt     DateTime     @default(now())
   updatedAt     DateTime     @updatedAt
+
   @@index([status])
   @@index([availableAt])
   @@index([eventType])

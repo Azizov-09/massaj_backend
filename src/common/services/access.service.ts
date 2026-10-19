@@ -24,6 +24,7 @@ export class AccessService {
               { attendances: { some: { specialistId: specialist.id } } },
               { assessments: { some: { specialistId: specialist.id } } },
               { progressEntries: { some: { specialistId: specialist.id } } },
+              { appointments: { some: { specialistId: specialist.id } } },
             ],
           },
           select: { id: true },

@@ -30,6 +30,31 @@ describe('clinical migration and Goals removal safety', () => {
     }
   });
 
+  it('isolates non-destructive appointment/finance DDL from the guarded Goals drop', () => {
+    const nonDestructive = read(
+      'prisma/migrations/20261018090000_restore_appointments_and_finance_integrity/migration.sql',
+    );
+    const goalsDrop = read('prisma/migrations/20261018091000_remove_goals/migration.sql');
+
+    expect(nonDestructive).toContain('CREATE TABLE "Appointment"');
+    expect(nonDestructive).toContain('Transaction_payment_once_key');
+    expect(nonDestructive).toContain('ALTER COLUMN "idempotencyKey" TYPE VARCHAR(512)');
+    expect(read('prisma/schema.prisma')).toContain('idempotencyKey String?              @unique @db.VarChar(512)');
+    expect(nonDestructive).not.toMatch(/DROP\s+(TABLE|TYPE).*Goal/i);
+    expect(goalsDrop).toContain(`to_regclass('"Goal"')`);
+    expect(goalsDrop).toContain('Goal rows remain');
+    expect(goalsDrop).toContain('DROP TABLE IF EXISTS "Goal"');
+    expect(goalsDrop).not.toContain('CREATE TABLE "Appointment"');
+  });
+
+  it('requires explicit development reset confirmation and verifies the Goals backup checksum', () => {
+    const source = read('src/database/reset-development.ts');
+    expect(source).toContain("ALLOW_DATABASE_RESET !== 'true'");
+    expect(source).toContain("CONFIRM_SEED_ONLY_DATA !== 'true'");
+    expect(source).toContain('CONFIRM_DATABASE_NAME');
+    expect(source).toContain('storedChecksum !== checksum');
+  });
+
   it('keeps the integrity audit implementation read-only', () => {
     const source = read('src/database/data-integrity.audit.ts');
     expect(source).not.toMatch(/\.\s*(create|createMany|update|updateMany|delete|deleteMany|upsert)\s*\(/i);

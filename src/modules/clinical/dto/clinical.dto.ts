@@ -4,6 +4,11 @@ import { Type } from 'class-transformer';
 import { IsDateString, IsEnum, IsInt, IsOptional, IsString, IsUUID, Length, Max, MaxLength, Min } from 'class-validator';
 
 export class CreateAttendanceDto {
+  @ApiPropertyOptional({ description: 'Appointment UUID; one attendance record is allowed per appointment' })
+  @IsOptional()
+  @IsUUID()
+  appointmentId?: string;
+
   @ApiProperty({ description: 'Target child UUID' })
   @IsUUID()
   childId!: string;

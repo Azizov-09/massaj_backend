@@ -1,8 +1,8 @@
-import { Body, Controller, Get, Param, Patch, Query } from '@nestjs/common';
+import { Body, Controller, Get, Param, ParseUUIDPipe, Patch, Query } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiParam, ApiPropertyOptional, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { Role } from '@prisma/client';
 import { Type } from 'class-transformer';
-import { IsOptional, Max, Min } from 'class-validator';
+import { IsInt, IsOptional, Max, Min } from 'class-validator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { RequestUser } from '../../common/types/request-user.type';
@@ -13,12 +13,14 @@ class NotificationPageDto {
   @ApiPropertyOptional({ description: 'Page number', default: 1 })
   @IsOptional()
   @Type(() => Number)
+  @IsInt()
   @Min(1)
   page = 1;
 
   @ApiPropertyOptional({ description: 'Items per page', default: 20 })
   @IsOptional()
   @Type(() => Number)
+  @IsInt()
   @Min(1)
   @Max(100)
   limit = 20;
@@ -49,7 +51,7 @@ export class NotificationsController {
   @ApiParam({ name: 'id', description: 'Notification UUID' })
   @ApiResponse({ status: 200, description: 'Notification details.' })
   @ApiResponse({ status: 404, description: 'Notification not found.' })
-  get(@Param('id') id: string, @CurrentUser() user: RequestUser) {
+  get(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() user: RequestUser) {
     return this.notifications.getOne(id, user.id);
   }
 
@@ -57,7 +59,7 @@ export class NotificationsController {
   @ApiOperation({ summary: 'Mark Notification As Read' })
   @ApiParam({ name: 'id', description: 'Notification UUID' })
   @ApiResponse({ status: 200, description: 'Notification marked as read.' })
-  read(@Param('id') id: string, @CurrentUser() user: RequestUser) {
+  read(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() user: RequestUser) {
     return this.notifications.markRead(id, user.id);
   }
 

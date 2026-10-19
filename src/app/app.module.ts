@@ -25,6 +25,7 @@ import { AnalyticsModule } from '../modules/analytics/analytics.module';
 import { ReportsModule } from '../modules/reports/reports.module';
 import { AdminsModule } from '../modules/admins/admins.module';
 import { EmployeesModule } from '../modules/employees/employees.module';
+import { AppointmentsModule } from '../modules/appointments/appointments.module';
 
 @Module({
   imports: [
@@ -53,6 +54,7 @@ import { EmployeesModule } from '../modules/employees/employees.module';
     ReportsModule,
     AdminsModule,
     EmployeesModule,
+    AppointmentsModule,
   ],
   providers: [
     { provide: APP_GUARD, useClass: ThrottlerGuard },

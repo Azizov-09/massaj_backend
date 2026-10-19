@@ -84,12 +84,14 @@ export class FinanceQueryDto {
   @ApiPropertyOptional({ description: 'Page number', default: 1 })
   @IsOptional()
   @Type(() => Number)
+  @IsInt()
   @Min(1)
   page = 1;
 
   @ApiPropertyOptional({ description: 'Items per page', default: 50 })
   @IsOptional()
   @Type(() => Number)
+  @IsInt()
   @Min(1)
   @Max(100)
   limit = 50;
@@ -104,6 +106,11 @@ export class RecordChargeDto {
   @IsOptional()
   @IsUUID()
   childId?: string;
+
+  @ApiPropertyOptional({ description: 'Completed appointment UUID; prevents charging the same session twice' })
+  @IsOptional()
+  @IsUUID()
+  appointmentId?: string;
 
   @ApiProperty({ description: 'Charge amount in UZS' })
   @Type(() => Number)

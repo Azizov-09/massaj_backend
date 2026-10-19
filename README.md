@@ -10,7 +10,7 @@
   - Roles: `SUPER_ADMIN`, `ADMIN`, `SPECIALIST`, `PARENT`.
   - Children are domain entities, not authentication roles. Access to children's clinical and personal data is protected by `AccessService` asserting parent-child custody and assigned specialist permissions.
 - **Authentication & Session Lifecycle**:
-  - Double-token architecture: short-lived access JWT (15m) + cryptographic refresh token in `HttpOnly`, `SameSite=Strict` cookie (30d).
+  - Double-token architecture: short-lived access JWT (15m) + rotating refresh token in an `HttpOnly` cookie (`Secure; SameSite=None` in production, `SameSite=Lax` for local HTTP development).
   - Password hashing with **Argon2id**.
   - Token versioning (`tokenVersion`) allowing immediate session revocation across all active devices.
   - Refresh token reuse detection: invalidating all sessions if an old token is replayed.
@@ -75,6 +75,8 @@ npx prisma generate
 npm run prisma:migrate
 ```
 
+Mock data is never seeded implicitly. For an approved localhost development/test database, use the guarded reset described in `docs/goals-removal-plan.md`; otherwise run `npm run db:seed` only against an already approved seed dataset.
+
 ### 5. Start Development Server
 
 ```bash
@@ -98,6 +100,7 @@ Interactive documentation is fully configured and annotated across all modules w
   - `Authentication`: Login, refresh, multi-device logout, change password
   - `Profiles`: Parent, Specialist, and Admin management
   - `Children`: Child registry, parent delegation links, archiving
+  - `Appointments`: Course scheduling, calendar visibility, and lifecycle transitions
   - `Clinical Records`: Attendance, assessments, and milestone progress
   - `Finance`: Payments, ledger transactions, refunds, balances, debtor summaries
   - `Services`: Therapy catalog, duration, pricing
@@ -134,6 +137,9 @@ npm run test:e2e:isolated
 
 # Read-only database integrity report (non-zero exit means issues were found)
 npm run audit:data-integrity
+
+# Guarded localhost-only reset (requires three explicit confirmation variables)
+npm run db:reset:development
 ```
 
 ---

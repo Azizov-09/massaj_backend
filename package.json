@@ -21,7 +21,8 @@
     "prisma:deploy": "prisma migrate deploy",
     "audit:data-integrity": "ts-node src/database/data-integrity.audit.ts",
     "seed": "ts-node prisma/seed.ts",
-    "db:seed": "prisma db seed"
+    "db:seed": "prisma db seed",
+    "db:reset:development": "ts-node src/database/reset-development.ts"
   },
   "dependencies": {
     "@nestjs/bullmq": "^11.0.3",

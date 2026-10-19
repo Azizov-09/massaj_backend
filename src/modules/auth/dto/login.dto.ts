@@ -1,4 +1,4 @@
-import { ApiProperty } from '@nestjs/swagger';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { IsOptional, IsString, Length, Matches } from 'class-validator';
 
 export class LoginDto {
@@ -19,7 +19,7 @@ export class LoginDto {
 }
 
 export class RefreshDto {
-  @ApiProperty({
+  @ApiPropertyOptional({
     description: 'Cryptographic refresh token string',
   })
   @IsOptional()

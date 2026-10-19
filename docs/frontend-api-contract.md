@@ -1,6 +1,6 @@
 # Massaj CRM Backend Contract
 
-Status: coordinated-release draft for the current backend worktree.
+Status: finalization contract for the current backend worktree.
 
 Base URL: `/api/v1`. Protected endpoints require `Authorization: Bearer <accessToken>`. Monetary values are positive whole UZS integers; clients must not multiply or divide them by 100.
 
@@ -56,9 +56,26 @@ An identical retry returns the existing payment. Reusing the same key for a diff
 
 Validation failures, future payment dates, and invalid parent-child relations are final until the request is corrected. Do not show a success toast for any non-2xx response.
 
+Failed payment requests are not persisted as Payment rows. The database transaction rolls back the Payment, ledger row, notification, and audit log together, so failed requests never change balance and never create a success notification.
+
 ## 4. Debtor payment
 
 Debtor payment uses the same `POST /payments` request. Obtain `parentId` and `childId` from `GET /debtors`; do not derive either identifier from a display name. Partial and full payments use the real amount received. The ledger calculates the remaining balance/debt atomically.
+
+`GET /debtors` — roles: `SUPER_ADMIN`, `ADMIN`. The response is an array ordered by highest debt first:
+
+```json
+[
+  {
+    "parentId": "parent-profile-uuid",
+    "debt": 400000,
+    "parent": { "id": "parent-profile-uuid", "user": { "fullName": "Ali Valiyev", "phone": "+998901234567" } },
+    "children": [
+      { "id": "child-uuid", "firstName": "Umar", "lastName": "Valiyev", "fullName": "Umar Valiyev", "debt": 400000 }
+    ]
+  }
+]
+```
 
 ## 5. Assessment list and detail
 
@@ -83,9 +100,19 @@ List responses wrap records in `{ "items": [], "meta": { "page": 1, "limit": 50,
 - `GET /progress?page=1&limit=50&childId=<uuid>&specialistId=<uuid>&from=<ISO>&to=<ISO>`
 - `GET /progress/:id`
 
-The relation shape matches assessments, with `progressDate` sourced from `occurredAt`. `specialist` is the treating specialist; `recordedBy` identifies the user who created the record and may be `null` for historical rows. Creating or updating a progress record with a future `occurredAt` returns `400`. Appointments/sessions are no longer runtime entities, so progress records intentionally have no appointment/session identifier.
+The relation shape matches assessments, with `progressDate` sourced from `occurredAt`. `specialist` is the treating specialist; `recordedBy` identifies the user who created the record and may be `null` for historical rows. Creating or updating a progress record with a future `occurredAt` returns `400`. Progress records are clinical events and intentionally do not require an appointment identifier.
 
-## 7. Payment list and detail
+## 7. Appointment calendar
+
+- `POST /appointments` — roles: `SUPER_ADMIN`, `ADMIN`
+- `GET /appointments?page=1&limit=50&childId=<uuid>&specialistId=<uuid>&status=<status>&from=<ISO>&to=<ISO>`
+- `GET /appointments/:id`
+- `PATCH /appointments/:id`
+- `PATCH /appointments/:id/status`
+
+Course appointments use the same non-empty `courseKey` plus unique `sequenceNumber` values. The backend calculates `endAt` from the selected Service duration and rejects overlapping child or specialist appointments.
+
+## 8. Payment list and detail
 
 - `GET /payments` — roles: `SUPER_ADMIN`, `ADMIN`
 - `GET /payments/:id` — roles: `SUPER_ADMIN`, `ADMIN`
@@ -101,7 +128,9 @@ The relation shape matches assessments, with `progressDate` sourced from `occurr
 }
 ```
 
-## 8. Notification
+## 9. Notification
+
+`GET /notifications?page=1&limit=50` returns `{ "items": [], "meta": { ... } }` scoped to the authenticated user. The server ignores client-supplied user identifiers.
 
 ```json
 {
@@ -119,7 +148,7 @@ The relation shape matches assessments, with `progressDate` sourced from `occurr
 
 A payment success notification is created inside the same database transaction. Realtime `notification:new` is emitted only after commit.
 
-## 9. Refresh endpoint
+## 10. Refresh endpoint
 
 `POST /auth/refresh`. Preferred transport is the `refresh_token` HttpOnly cookie with `credentials: "include"`. A body token remains supported during the coordinated migration:
 
@@ -129,7 +158,9 @@ A payment success notification is created inside the same database transaction. 
 
 Success returns `{ "accessToken": "..." }` and rotates the HttpOnly cookie. The refresh token is intentionally not returned in JSON. Access tokens are bound to the backing session; logout or revocation invalidates them immediately.
 
-## 10. Status and retry rules
+Frontend requests must use `credentials: "include"`. Production uses `Secure; SameSite=None`; local HTTP development uses `SameSite=Lax`. `FRONTEND_URL` and optional comma-separated `FRONTEND_ORIGINS` are the only credentialed HTTP/WebSocket origins.
+
+## 11. Status and retry rules
 
 | Status | Meaning | Client action |
 |---|---|---|

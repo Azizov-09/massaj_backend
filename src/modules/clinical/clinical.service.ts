@@ -5,7 +5,7 @@ import {
   InternalServerErrorException,
   NotFoundException,
 } from '@nestjs/common';
-import { Prisma, Role } from '@prisma/client';
+import { AppointmentStatus, AttendanceStatus, Prisma, Role } from '@prisma/client';
 import { AccessService } from '../../common/services/access.service';
 import { RequestUser } from '../../common/types/request-user.type';
 import { PrismaService } from '../../database/prisma.service';
@@ -50,15 +50,62 @@ export class ClinicalService {
 
   async attendance(dto: CreateAttendanceDto, user: RequestUser) {
     await this.access.assertChildAccess(user, dto.childId);
+    const appointment = dto.appointmentId
+      ? await this.prisma.appointment.findUnique({ where: { id: dto.appointmentId } })
+      : null;
+    if (dto.appointmentId && !appointment) throw new NotFoundException('Appointment not found');
+    if (appointment && appointment.childId !== dto.childId) {
+      throw new BadRequestException('Appointment belongs to another child');
+    }
+    const closedAppointmentStatuses: AppointmentStatus[] = [
+      AppointmentStatus.CANCELLED,
+      AppointmentStatus.COMPLETED,
+      AppointmentStatus.NO_SHOW,
+    ];
+    if (appointment && closedAppointmentStatuses.includes(appointment.status)) {
+      throw new BadRequestException('Attendance cannot be recorded for this appointment status');
+    }
     let specialistId: string | undefined;
-    if (user.role === Role.SPECIALIST) specialistId = await this.access.currentSpecialistId(user.id);
+    if (user.role === Role.SPECIALIST) {
+      specialistId = await this.access.currentSpecialistId(user.id);
+      if (appointment && appointment.specialistId !== specialistId) {
+        throw new ForbiddenException('Appointment belongs to another specialist');
+      }
+    }
     else if (dto.specialistId) {
       specialistId = dto.specialistId;
       await this.assertSpecialistChild(specialistId, dto.childId);
     }
-    const date = dto.date ? this.requireNotFuture(dto.date, 'Attendance date') : new Date();
-    return this.prisma.attendance.create({
-      data: { childId: dto.childId, specialistId, status: dto.status, note: dto.note, date },
+    if (appointment) {
+      if (dto.specialistId && dto.specialistId !== appointment.specialistId) {
+        throw new BadRequestException('Attendance specialist must match the appointment');
+      }
+      specialistId = appointment.specialistId;
+    }
+    const date = dto.date
+      ? this.requireNotFuture(dto.date, 'Attendance date')
+      : appointment
+        ? this.requireNotFuture(appointment.startAt.toISOString(), 'Attendance date')
+        : new Date();
+    return this.prisma.$transaction(async (tx) => {
+      const attendance = await tx.attendance.create({
+        data: {
+          appointmentId: dto.appointmentId,
+          childId: dto.childId,
+          specialistId,
+          status: dto.status,
+          note: dto.note,
+          date,
+        },
+      });
+      if (appointment) {
+        const completed = dto.status === AttendanceStatus.PRESENT || dto.status === AttendanceStatus.LATE;
+        await tx.appointment.update({
+          where: { id: appointment.id },
+          data: { status: completed ? AppointmentStatus.COMPLETED : AppointmentStatus.NO_SHOW },
+        });
+      }
+      return attendance;
     });
   }
 
@@ -69,7 +116,17 @@ export class ClinicalService {
     else if (user.role === Role.SPECIALIST) {
       throw new ForbiddenException('Only administrators or assigned specialists can update attendance');
     }
-    return this.prisma.attendance.update({ where: { id }, data: dto });
+    return this.prisma.$transaction(async (tx) => {
+      const updated = await tx.attendance.update({ where: { id }, data: dto });
+      if (row.appointmentId) {
+        const completed = dto.status === AttendanceStatus.PRESENT || dto.status === AttendanceStatus.LATE;
+        await tx.appointment.update({
+          where: { id: row.appointmentId },
+          data: { status: completed ? AppointmentStatus.COMPLETED : AppointmentStatus.NO_SHOW },
+        });
+      }
+      return updated;
+    });
   }
 
   async attendances(childId: string, user: RequestUser) {

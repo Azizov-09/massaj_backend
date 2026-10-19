@@ -57,7 +57,7 @@ describe('AuthController Rate Limiting & Auth Unit Tests', () => {
       refreshToken: 'rotated-refresh',
     });
     const mockReq: any = {
-      headers: { origin: 'https://massaj-frontent.vercel.app', 'user-agent': 'Jest-Agent' },
+      headers: { origin: 'http://localhost:5173', 'user-agent': 'Jest-Agent' },
       cookies: { refresh_token: 'cookie-refresh-token' },
       ip: '127.0.0.1',
     };
@@ -92,7 +92,7 @@ describe('AuthController Rate Limiting & Auth Unit Tests', () => {
 
   it('revokes the refresh session and clears its cookie on logout', async () => {
     const mockReq: any = {
-      headers: { origin: 'https://massaj-frontent.vercel.app' },
+      headers: { origin: 'http://localhost:5173' },
       cookies: { refresh_token: 'cookie-refresh-token' },
     };
     const mockRes: any = { clearCookie: jest.fn() };

@@ -13,6 +13,7 @@ import { Public } from '../../common/decorators/public.decorator';
 import { RequestUser } from '../../common/types/request-user.type';
 import { ChangePasswordDto, LoginDto, RefreshDto } from './dto/login.dto';
 import { AuthService } from './auth.service';
+import { durationToMilliseconds, trustedFrontendOrigins } from '../../common/utils/http-config.util';
 
 @ApiTags('Authentication')
 @Controller('auth')
@@ -118,7 +119,7 @@ export class AuthController {
       httpOnly: true,
       sameSite: isSecure ? 'none' : 'lax',
       secure: isSecure,
-      maxAge: 30 * 24 * 60 * 60 * 1000,
+      maxAge: durationToMilliseconds(process.env.JWT_REFRESH_EXPIRES_IN ?? '30d'),
       path: '/api/v1/auth',
       ...(process.env.COOKIE_DOMAIN ? { domain: process.env.COOKIE_DOMAIN } : {}),
     });
@@ -146,9 +147,7 @@ export class AuthController {
   private assertTrustedOrigin(request: Request): void {
     const origin = request.headers.origin;
     if (!origin) return;
-    const trusted = new Set<string>(['https://massaj-frontent.vercel.app']);
-    if (process.env.FRONTEND_URL) trusted.add(process.env.FRONTEND_URL);
-    if (process.env.NODE_ENV !== 'production') trusted.add('http://localhost:5173').add('http://localhost:3000');
+    const trusted = new Set(trustedFrontendOrigins());
     if (!trusted.has(origin)) throw new ForbiddenException('Untrusted request origin');
   }
 }

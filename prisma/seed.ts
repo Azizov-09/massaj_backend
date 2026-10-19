@@ -4,7 +4,8 @@ import { seedDatabase } from '../src/database/seed';
 const prisma = new PrismaClient();
 
 async function main(): Promise<void> {
-  await seedDatabase(prisma, true);
+  const summary = await seedDatabase(prisma);
+  process.stdout.write(`${JSON.stringify(summary, null, 2)}\n`);
 }
 
 main()

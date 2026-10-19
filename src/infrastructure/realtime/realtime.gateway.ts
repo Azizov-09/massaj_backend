@@ -13,14 +13,9 @@ import { ConfigService } from '@nestjs/config';
 import { UserStatus } from '@prisma/client';
 import { AppConfiguration } from '../../config/configuration';
 import { PrismaService } from '../../database/prisma.service';
+import { allowTrustedFrontendOrigin } from '../../common/utils/http-config.util';
 
 interface JwtPayload { sub: string; sid: string; role: string; tv: number; exp: number; }
-
-const realtimeOrigins = ['https://massaj-frontent.vercel.app'];
-if (process.env.NODE_ENV !== 'production') realtimeOrigins.push('http://localhost:5173', 'http://localhost:3000');
-if (process.env.FRONTEND_URL && !realtimeOrigins.includes(process.env.FRONTEND_URL)) {
-  realtimeOrigins.push(process.env.FRONTEND_URL);
-}
 
 /**
  * WebSocket gateway for real-time in-app notifications.
@@ -41,7 +36,7 @@ interface AuthenticatedSocket extends Socket {
 
 @WebSocketGateway({
   cors: {
-    origin: realtimeOrigins,
+    origin: allowTrustedFrontendOrigin,
     credentials: true,
   },
   namespace: '/realtime',

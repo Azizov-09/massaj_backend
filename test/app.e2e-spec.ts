@@ -7,6 +7,8 @@ import { JwtService } from '@nestjs/jwt';
 import { AppModule } from '../src/app/app.module';
 import { PrismaService } from '../src/database/prisma.service';
 import { Gender, PaymentMethod, Role, UserStatus } from '@prisma/client';
+import { SEED_DEFAULT_PASSWORD, SEED_IDS } from '../src/database/seed';
+import { trustedFrontendOrigins } from '../src/common/utils/http-config.util';
 
 describe('Rehabilitation Center CRM (Comprehensive E2E Tests)', () => {
   let app: INestApplication;
@@ -23,6 +25,8 @@ describe('Rehabilitation Center CRM (Comprehensive E2E Tests)', () => {
   let parentProfileId: string;
   let parent2ProfileId: string;
   let childId: string;
+  let serviceId: string;
+  let appointmentId: string;
   let paymentId: string;
 
   beforeAll(async () => {
@@ -33,6 +37,12 @@ describe('Rehabilitation Center CRM (Comprehensive E2E Tests)', () => {
     app = moduleFixture.createNestApplication();
     app.setGlobalPrefix('api/v1');
     app.use(cookieParser());
+    app.enableCors({
+      origin: trustedFrontendOrigins(),
+      credentials: true,
+      methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+      allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept', 'Origin'],
+    });
     app.useGlobalPipes(
       new ValidationPipe({
         whitelist: true,
@@ -198,6 +208,107 @@ describe('Rehabilitation Center CRM (Comprehensive E2E Tests)', () => {
         redis: 'connected',
       });
     });
+
+    it('allows credentialed CORS only for a configured frontend origin', async () => {
+      const allowed = await request(app.getHttpServer())
+        .options('/api/v1/auth/refresh')
+        .set('Origin', 'http://localhost:5173')
+        .set('Access-Control-Request-Method', 'POST')
+        .expect(204);
+      expect(allowed.headers['access-control-allow-origin']).toBe('http://localhost:5173');
+      expect(allowed.headers['access-control-allow-credentials']).toBe('true');
+
+      const rejected = await request(app.getHttpServer())
+        .options('/api/v1/auth/refresh')
+        .set('Origin', 'https://attacker.example')
+        .set('Access-Control-Request-Method', 'POST')
+        .expect(204);
+      expect(rejected.headers['access-control-allow-origin']).toBeUndefined();
+    });
+  });
+
+  describe('Seeded finalization business flow', () => {
+    it('runs login, schedule, clinical, partial debt, ledger, notification, refresh, logout, and relogin', async () => {
+      const login = await request(app.getHttpServer())
+        .post('/api/v1/auth/login')
+        .send({ phone: '+998901000001', password: SEED_DEFAULT_PASSWORD })
+        .expect(200);
+      const accessToken = login.body.accessToken as string;
+      const originalCookie = (((login.headers['set-cookie'] as string[] | undefined) ?? [])[0] ?? '').split(';')[0];
+      if (!originalCookie) throw new Error('Login did not set the refresh cookie');
+
+      const schedule = await request(app.getHttpServer())
+        .get('/api/v1/appointments')
+        .query({ childId: SEED_IDS.children[0], page: 1, limit: 20 })
+        .set('Authorization', `Bearer ${accessToken}`)
+        .expect(200);
+      expect(schedule.body.items).toHaveLength(10);
+      expect(schedule.body.items.filter((row: { status: string }) => row.status === 'COMPLETED')).toHaveLength(6);
+
+      const [assessments, progress, initialBalance] = await Promise.all([
+        request(app.getHttpServer()).get('/api/v1/assessments').query({ childId: SEED_IDS.children[0] }).set('Authorization', `Bearer ${accessToken}`).expect(200),
+        request(app.getHttpServer()).get('/api/v1/progress').query({ childId: SEED_IDS.children[0] }).set('Authorization', `Bearer ${accessToken}`).expect(200),
+        request(app.getHttpServer()).get(`/api/v1/children/${SEED_IDS.children[0]}/balance`).set('Authorization', `Bearer ${accessToken}`).expect(200),
+      ]);
+      expect(assessments.body.items).toHaveLength(1);
+      expect(progress.body.items).toHaveLength(1);
+      expect(initialBalance.body[0].debt).toBe(400_000);
+
+      const paymentKey = 'seeded-e2e-partial-payment';
+      const payment = await request(app.getHttpServer())
+        .post('/api/v1/payments')
+        .set('Authorization', `Bearer ${accessToken}`)
+        .send({
+          parentId: SEED_IDS.parents[0],
+          childId: SEED_IDS.children[0],
+          amount: 100_000,
+          method: PaymentMethod.CASH,
+          note: 'Seeded flow partial debt payment',
+          idempotencyKey: paymentKey,
+        })
+        .expect(201);
+
+      const [balance, transactions, debtors] = await Promise.all([
+        request(app.getHttpServer()).get(`/api/v1/children/${SEED_IDS.children[0]}/balance`).set('Authorization', `Bearer ${accessToken}`).expect(200),
+        request(app.getHttpServer()).get('/api/v1/transactions').query({ childId: SEED_IDS.children[0] }).set('Authorization', `Bearer ${accessToken}`).expect(200),
+        request(app.getHttpServer()).get('/api/v1/debtors').set('Authorization', `Bearer ${accessToken}`).expect(200),
+      ]);
+      expect(balance.body[0].debt).toBe(300_000);
+      expect(transactions.body.items.some((row: { paymentId?: string }) => row.paymentId === payment.body.id)).toBe(true);
+      expect(debtors.body.some((row: { parentId: string; debt: number }) => row.parentId === SEED_IDS.parents[0] && row.debt === 300_000)).toBe(true);
+
+      const parentLogin = await request(app.getHttpServer())
+        .post('/api/v1/auth/login')
+        .send({ phone: '+998903000001', password: SEED_DEFAULT_PASSWORD })
+        .expect(200);
+      const notifications = await request(app.getHttpServer())
+        .get('/api/v1/notifications')
+        .set('Authorization', `Bearer ${parentLogin.body.accessToken}`)
+        .expect(200);
+      expect(notifications.body.items.some((row: { relatedEntityId?: string }) => row.relatedEntityId === payment.body.id)).toBe(true);
+
+      const refreshed = await request(app.getHttpServer())
+        .post('/api/v1/auth/refresh')
+        .set('Cookie', originalCookie)
+        .send({})
+        .expect(200);
+      const rotatedCookie = ((((refreshed.headers['set-cookie'] as string[] | undefined) ?? [])[0] ?? '')).split(';')[0];
+      if (!rotatedCookie) throw new Error('Refresh did not rotate the refresh cookie');
+      await request(app.getHttpServer())
+        .post('/api/v1/auth/logout')
+        .set('Authorization', `Bearer ${refreshed.body.accessToken}`)
+        .set('Cookie', rotatedCookie)
+        .send({})
+        .expect(204);
+      await request(app.getHttpServer())
+        .get('/api/v1/services')
+        .set('Authorization', `Bearer ${refreshed.body.accessToken}`)
+        .expect(401);
+      await request(app.getHttpServer())
+        .post('/api/v1/auth/login')
+        .send({ phone: '+998901000001', password: SEED_DEFAULT_PASSWORD })
+        .expect(200);
+    });
   });
 
   describe('Authentication Security Workflows', () => {
@@ -358,6 +469,7 @@ describe('Rehabilitation Center CRM (Comprehensive E2E Tests)', () => {
 
       expect(res.body.id).toBeDefined();
       expect(res.body.price).toBe(150_000);
+      serviceId = res.body.id;
     });
 
     it('creates Child (ADMIN only)', async () => {
@@ -451,11 +563,37 @@ describe('Rehabilitation Center CRM (Comprehensive E2E Tests)', () => {
   describe('Clinical Attendance Lifecycle', () => {
     let attendanceId: string;
 
-    it('records attendance for child without creating appointments', async () => {
+    it('creates an appointment that is visible in the schedule', async () => {
+      const res = await request(app.getHttpServer())
+        .post('/api/v1/appointments')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({
+          childId,
+          parentId: parentProfileId,
+          specialistId: specialistProfileId,
+          serviceId,
+          startAt: new Date(Date.now() - 60_000).toISOString(),
+          courseKey: `e2e-course-${childId}`,
+          sequenceNumber: 1,
+          notes: 'E2E completed session',
+        })
+        .expect(201);
+      appointmentId = res.body.id;
+
+      const schedule = await request(app.getHttpServer())
+        .get('/api/v1/appointments')
+        .query({ childId })
+        .set('Authorization', `Bearer ${adminToken}`)
+        .expect(200);
+      expect(schedule.body.items.some((row: { id: string }) => row.id === appointmentId)).toBe(true);
+    });
+
+    it('records attendance against the appointment', async () => {
       const res = await request(app.getHttpServer())
         .post('/api/v1/attendance')
         .set('Authorization', `Bearer ${adminToken}`)
         .send({
+          appointmentId,
           childId,
           specialistId: specialistProfileId,
           status: 'PRESENT',
@@ -466,6 +604,8 @@ describe('Rehabilitation Center CRM (Comprehensive E2E Tests)', () => {
       expect(res.body.id).toBeDefined();
       expect(res.body.status).toBe('PRESENT');
       attendanceId = res.body.id;
+      const appointment = await prisma.appointment.findUniqueOrThrow({ where: { id: appointmentId } });
+      expect(appointment.status).toBe('COMPLETED');
     });
 
     it('allows the assigned specialist to access the child after attendance assignment', async () => {
@@ -513,6 +653,7 @@ describe('Rehabilitation Center CRM (Comprehensive E2E Tests)', () => {
         .send({
           parentId: parentProfileId,
           childId,
+          appointmentId,
           amount: 150_000,
           description: 'Charge for completed physical rehabilitation therapy',
           idempotencyKey: `charge-e2e-${Date.now()}`,
@@ -616,6 +757,7 @@ describe('Rehabilitation Center CRM (Comprehensive E2E Tests)', () => {
   describe('Transactional Finance (Debt-First Allocation & Refunds)', () => {
     it('rejects an unrelated parent-child payment without partial writes', async () => {
       const key = `invalid-relation-e2e-${Date.now()}`;
+      const notificationsBefore = await prisma.notification.count({ where: { type: 'PAYMENT' } });
       await request(app.getHttpServer())
         .post('/api/v1/payments')
         .set('Authorization', `Bearer ${adminToken}`)
@@ -630,6 +772,7 @@ describe('Rehabilitation Center CRM (Comprehensive E2E Tests)', () => {
 
       expect(await prisma.payment.count({ where: { idempotencyKey: key } })).toBe(0);
       expect(await prisma.transaction.count({ where: { idempotencyKey: `payment:${key}` } })).toBe(0);
+      expect(await prisma.notification.count({ where: { type: 'PAYMENT' } })).toBe(notificationsBefore);
     });
 
     it('records manual payment: pays off 150k debt and leaves 50k balance', async () => {

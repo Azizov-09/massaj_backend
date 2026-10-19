@@ -1,67 +1,84 @@
-# Massaj CRM Backend Audit Report
+# Massaj CRM Backend Finalization Report
 
-Date: 2026-10-18 (Asia/Tashkent)
+Date: 2026-10-19 (Asia/Tashkent)
 
-## Root causes addressed
+## Database and migration result
 
-- Assessment/progress list responses did not expose normalized child and specialist identities.
-- Clinical event time was conflated with row creation time.
-- Legacy callers could send a User UUID where finance expected a Parent profile UUID.
-- Financial retries were not uniformly idempotent and serializable conflicts had no bounded retry.
-- Payment success notifications needed the same atomic boundary as payment and ledger writes.
-- Access JWTs trusted an embedded role and were not bound to a revocable session.
-- Goals runtime dependencies remained after the product decision to remove the feature.
+- Eight migrations apply in order on a generated isolated PostgreSQL schema.
+- `Assessment.assessedAt` and `ProgressEntry.occurredAt` are backfilled from `createdAt`, required, indexed, and used by the API.
+- Appointment/calendar tables and relations are restored in a dedicated non-destructive migration.
+- Payment/Transaction amounts are positive by database checks; one PAYMENT ledger row per Payment is enforced by a partial unique index; PAYMENT shape requires a linked Payment, parent, child, and IN direction.
+- Transaction idempotency storage is 512 characters so a valid 255-character client key remains valid after internal prefixes.
+- Goals removal is a separate transactional migration and fails while Goal rows remain.
+- The approved localhost development database was reset; `prisma migrate status` reports the schema is up to date.
 
-## Implemented changes
+## Seed result
 
-- Relation-aware assessment/progress list and detail responses, filters, pagination, access scoping, and future-date validation.
-- Non-destructive `assessedAt`/`occurredAt` migration with existing-row backfill from `createdAt`.
-- Goals API/service/DTO/portal/seed removal while retaining historical database rows pending approval.
-- Parent identifier normalization, mandatory idempotency, serializable payment/refund/charge transactions, conflict retry, post-commit realtime emission, and payer/child presentation.
-- Finance read RBAC, admin session revocation, refresh replay containment, database-role resolution, and session-bound HTTP/WebSocket access tokens.
-- Read-only data-integrity audit command and coordinated frontend contract.
+Dataset: `massaj-development-v2`.
 
-## Database migration status
+- Users: 7 (Super Admin, Admin, 2 Specialists, 3 Parents)
+- Appointments: 30 (three 10-session courses)
+- Attendance: 18 (six completed sessions per course)
+- Assessments: 3
+- Progress records: 3
+- Payments: 3
+- Seed ledger transactions: 21 (18 charges + 3 linked payments)
+- Notifications: 15 (12 appointment reminders + 3 payment confirmations)
 
-`prisma/migrations/20261017090000_add_clinical_event_dates` is non-destructive. It adds and backfills clinical event timestamps and indexes. It has not been applied to production. Goals destructive migration is intentionally absent and requires explicit approval.
+Expected account states are verified after every seed:
 
-## Data integrity diagnostics
+- Parent 1: 400,000 UZS debt
+- Parent 2: 0 balance / 0 debt
+- Parent 3: 200,000 UZS balance
 
-Run `npm run audit:data-integrity` using a read-only account. Production additionally requires `PRODUCTION_DIAGNOSTICS_APPROVED=true`. The command reports only counts and record IDs; it does not modify rows or print patient names.
+The seed was run twice inside the reset workflow and once again independently. Counts and ledger invariants remained unchanged; no duplicate rows were created.
 
-Checks cover orphan clinical rows, invalid payment relations, payment/ledger mismatches, invalid amounts, duplicate idempotency keys, invalid payment notifications, future clinical records, retained Goals, and unsupported legacy outbox events.
+## Goals removal
 
-The 2026-10-18 read-only local audit completed 11 checks. Eight passed. It found no orphan assessment/progress rows, invalid payment relations, non-positive amounts, duplicate financial idempotency keys, invalid payment notifications, future clinical records, or unsupported outbox events. It reported three deployment/data items that were intentionally not mutated:
+The previous localhost dataset contained 35 Goal rows and matched the legacy deterministic seed. Before reset, those rows were written to `.local-backups/` with a SHA-256 sidecar and the saved payload was re-read for checksum verification. After migration, the Goal table and `GoalStatus` enum are absent. Runtime and seed code contain no Goals dependency. Production was not changed.
 
-- the current local database is missing both clinical timestamp columns from the pending migration;
-- 50 legacy seeded payments do not have exactly one ledger row linked through `Transaction.paymentId`;
-- 35 historical Goal rows remain pending an approved archive/drop decision.
+Production backup, approval, deployment, and rollback requirements are documented in `docs/goals-removal-plan.md`.
 
-The seed generator now creates linked Payment/Transaction pairs for future seed runs. Existing ledger links and Goal rows require a separately approved repair/archive operation.
+## Payment and ledger integrity
 
-## Verification results
+- Payment, PAYMENT transaction, notification, and audit log commit in one Serializable transaction.
+- Retries are idempotent; reusing a key for different data returns 409.
+- Invalid/failed requests roll back fully, do not change balances, and do not create success notifications.
+- Whole-UZS integer validation is enforced in DTOs and positive amounts are enforced in PostgreSQL.
+- The read-only integrity audit checks both missing/multiple payment ledgers and orphan/mismatched PAYMENT ledger rows.
+- Post-reset audit result: 12/12 PASS, including zero payment/ledger mismatches.
 
-- Unit/regression: 15/15 suites and 106/106 tests passed.
-- Isolated E2E: 1/1 suite and 32/32 workflows passed, including expired-token refresh, clinical relation/filter/date checks, IDOR/RBAC, and concurrent payment idempotency.
-- TypeScript typecheck, ESLint with zero warnings, and Nest production build passed.
-- Prisma schema validation and client generation passed.
-- All six migrations applied successfully to a generated local PostgreSQL schema; the schema and dedicated empty Redis test database were cleaned after the run.
-- Direct `npm run test:e2e` refuses to run without isolated `TEST_DATABASE_URL` and `TEST_REDIS_URL`, preventing accidental use of the configured application database.
+## Frontend API contract
 
-## Frontend coordination
+Verified endpoints under `/api/v1`:
 
-Use `docs/frontend-api-contract.md`. Mandatory coordinated changes are idempotency keys for finance mutations, whole-UZS amounts, HttpOnly-cookie refresh handling, and forced re-login for legacy access tokens that lack a session ID.
+- `POST /payments`
+- `GET /payments`
+- `GET /debtors`
+- `GET /assessments`
+- `GET /progress`
+- `POST /auth/refresh`
+- `GET /notifications`
+- Appointment calendar CRUD/list/status endpoints
 
-## Pending approval or external prerequisites
+Refresh rotates an HttpOnly cookie and returns only an access token. Credentialed CORS and WebSocket origins use the same normalized `FRONTEND_URL`/`FRONTEND_ORIGINS` allowlist. Production config requires HTTPS frontend URL and `COOKIE_SECURE=true`.
 
-- Production read-only diagnostics approval and credentials.
-- Goals historical archive/drop approval.
-- Approval and a reviewed repair script for the 50 legacy payment/ledger links.
-- Deployment, monitoring, backup, and rollback owner confirmation.
+## Verification
 
-## Release risks
+- Prisma validate/generate: PASS
+- Unit/regression: 16/16 suites, 111/111 tests PASS
+- Isolated integration/E2E: 1/1 suite, 35/35 tests PASS
+- Isolated migration chain: 8/8 PASS
+- Seeder repeat/idempotency: PASS
+- Local migration status: up to date
+- Local data-integrity audit: 12/12 PASS
+- TypeScript typecheck: PASS
+- ESLint with zero warnings: PASS
+- Nest production build: PASS
 
-- A client released without required idempotency keys will receive `400`.
-- Existing access tokens without `sid` are rejected and require login.
-- Applying application code before the clinical timestamp migration will fail clinical queries.
-- Removing Goals data without completing the archive/checksum gate is irreversible data loss.
+## Deployment constraints
+
+- No production reset, migration deploy, or application deploy was performed.
+- For a production database with Goal rows, the Goals migration intentionally blocks until the approved encrypted backup/archive and row-clear procedure is complete.
+- Historical appointments removed by the old `20261010100000_remove_appointments_and_sessions` migration cannot be recreated by the new schema migration; restore them only from a verified historical backup if required.
+- Prisma's `package.json#prisma` seed configuration is deprecated for Prisma 7 and should move to `prisma.config.ts` during the future major upgrade.

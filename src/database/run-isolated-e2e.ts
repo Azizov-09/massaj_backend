@@ -86,6 +86,8 @@ async function main(): Promise<void> {
       PRISMA_ENGINES_CHECKSUM_IGNORE_MISSING: '1',
     };
     runNode(join(process.cwd(), 'node_modules', 'prisma', 'build', 'index.js'), ['migrate', 'deploy'], env);
+    runNode(join(process.cwd(), 'node_modules', 'ts-node', 'dist', 'bin.js'), ['prisma/seed.ts'], env);
+    runNode(join(process.cwd(), 'node_modules', 'ts-node', 'dist', 'bin.js'), ['prisma/seed.ts'], env);
     runNode(
       join(process.cwd(), 'node_modules', 'jest', 'bin', 'jest.js'),
       ['--config', './test/jest-e2e.json', '--runInBand'],

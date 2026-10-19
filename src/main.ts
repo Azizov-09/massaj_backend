@@ -9,6 +9,7 @@ import { AppModule } from './app/app.module';
 import { PrismaService } from './database/prisma.service';
 import { seedDatabase } from './database/seed';
 import { seedSuperAdmin } from './database/super-admin.seed';
+import { trustedFrontendOrigins } from './common/utils/http-config.util';
 
 async function bootstrap(): Promise<void> {
   const logger = new Logger('Bootstrap');
@@ -37,11 +38,7 @@ async function bootstrap(): Promise<void> {
 
   // Cross-Origin Resource Sharing (CORS) Policy
   const isProd = process.env.NODE_ENV === 'production';
-  const allowedOrigins: string[] = ['https://massaj-frontent.vercel.app'];
-  if (!isProd) allowedOrigins.push('http://localhost:5173', 'http://localhost:3000');
-  if (process.env.FRONTEND_URL && !allowedOrigins.includes(process.env.FRONTEND_URL)) {
-    allowedOrigins.push(process.env.FRONTEND_URL);
-  }
+  const allowedOrigins = trustedFrontendOrigins();
 
   app.enableCors({
     origin: allowedOrigins,
@@ -93,6 +90,7 @@ async function bootstrap(): Promise<void> {
     .addTag('Employees', 'Non-medical staff management — receptionist, nurse, accountant, etc.')
     .addTag('Profiles', 'Admin, Specialist, and Parent account profile operations')
     .addTag('Children', 'Child records, intake profiles, and parental custody delegation')
+    .addTag('Appointments', 'Course scheduling, calendar visibility, and appointment lifecycle')
     .addTag('Clinical Records', 'Clinical assessments, attendance, and developmental progress')
     .addTag('Finance', 'Payments, balance calculations, refunds, and double-entry ledger transactions')
     .addTag('Services', 'Clinic therapy service catalog, duration, and price tiers')
@@ -122,25 +120,29 @@ async function bootstrap(): Promise<void> {
   const prisma = app.get(PrismaService);
   prisma.enableShutdownHooks(app);
 
-  // Ensure Super Admin exists using credentials from .env
-  try {
-    await seedSuperAdmin(prisma);
-  } catch (err) {
-    logger.error('[SuperAdminSeed] Error during initial super admin seed check:', err);
-  }
-
-  // Auto-seed mock data on startup only in non-production environments if explicitly requested or empty db
+  // Mock data is never created implicitly. It must be explicitly enabled for an
+  // approved development/test environment or loaded by the guarded reset tool.
   const autoSeed = process.env.AUTO_SEED === 'true';
   try {
     const userCount = await prisma.user.count();
-    if (!isProd && (autoSeed || userCount === 0)) {
+    if (!isProd && autoSeed) {
       logger.log(`[AutoSeed] Checking/seeding development database (autoSeed=${autoSeed}, currentUsers=${userCount})...`);
-      await seedDatabase(prisma, autoSeed);
+      await seedDatabase(prisma);
+    } else if (!isProd && userCount === 0) {
+      logger.warn('[AutoSeed] Development database is empty. Run the guarded reset/seed command explicitly.');
     } else if (isProd && userCount === 0) {
       logger.warn('[AutoSeed] Production database has 0 users. Mock seeding is disabled in production for safety.');
     }
   } catch (err) {
     logger.error('[AutoSeed] Error during initial database seed check:', err);
+  }
+
+  // Production creates only the configured Super Admin. In development this is
+  // idempotent and coexists with the deterministic seed identity.
+  try {
+    await seedSuperAdmin(prisma);
+  } catch (err) {
+    logger.error('[SuperAdminSeed] Error during initial super admin seed check:', err);
   }
 
   const port = Number(process.env.PORT ?? 3000);
