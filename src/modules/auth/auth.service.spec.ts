@@ -31,7 +31,7 @@ describe('AuthService refresh rotation', () => {
       const values: Record<string, string> = {
         'jwt.refreshSecret': 'refresh-secret',
         'jwt.accessSecret': 'access-secret',
-        'jwt.refreshExpiresIn': '30d',
+        'jwt.refreshExpiresIn': '7d',
         'jwt.accessExpiresIn': '15m',
       };
       return values[key];

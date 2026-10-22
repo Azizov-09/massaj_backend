@@ -17,7 +17,7 @@ export default (): AppConfiguration => ({
     accessSecret: process.env.JWT_ACCESS_SECRET ?? '',
     refreshSecret: process.env.JWT_REFRESH_SECRET ?? '',
     accessExpiresIn: process.env.JWT_ACCESS_EXPIRES_IN ?? '15m',
-    refreshExpiresIn: process.env.JWT_REFRESH_EXPIRES_IN ?? '30d',
+    refreshExpiresIn: process.env.JWT_REFRESH_EXPIRES_IN ?? '7d',
   },
   cookies: { domain: process.env.COOKIE_DOMAIN, secure: process.env.COOKIE_SECURE === 'true' },
   redisUrl: process.env.REDIS_URL ?? 'redis://localhost:6379',

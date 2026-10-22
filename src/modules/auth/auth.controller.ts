@@ -119,7 +119,7 @@ export class AuthController {
       httpOnly: true,
       sameSite: isSecure ? 'none' : 'lax',
       secure: isSecure,
-      maxAge: durationToMilliseconds(process.env.JWT_REFRESH_EXPIRES_IN ?? '30d'),
+      maxAge: durationToMilliseconds(process.env.JWT_REFRESH_EXPIRES_IN ?? '7d'),
       path: '/api/v1/auth',
       ...(process.env.COOKIE_DOMAIN ? { domain: process.env.COOKIE_DOMAIN } : {}),
     });
