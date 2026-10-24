@@ -121,4 +121,28 @@ export class AdminsController {
   archive(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() user: RequestUser) {
     return this.admins.archive(id, user.id);
   }
+
+  @Post(':id/activate')
+  @HttpCode(200)
+  @ApiOperation({ summary: 'Activate Administrator' })
+  @ApiResponse({ status: 200, description: 'Administrator activated and old sessions revoked.' })
+  activate(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() user: RequestUser) {
+    return this.admins.activate(id, user.id);
+  }
+
+  @Post(':id/deactivate')
+  @HttpCode(200)
+  @ApiOperation({ summary: 'Deactivate Administrator' })
+  @ApiResponse({ status: 200, description: 'Administrator deactivated and sessions revoked.' })
+  deactivate(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() user: RequestUser) {
+    return this.admins.deactivate(id, user.id);
+  }
+
+  @Post(':id/restore')
+  @HttpCode(200)
+  @ApiOperation({ summary: 'Restore Archived Administrator' })
+  @ApiResponse({ status: 200, description: 'Administrator restored and activated.' })
+  restore(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() user: RequestUser) {
+    return this.admins.restore(id, user.id);
+  }
 }

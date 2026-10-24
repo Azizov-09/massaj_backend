@@ -43,7 +43,6 @@ describe('AuthService refresh rotation', () => {
     id: 'user-1',
     fullName: 'Admin User',
     phone: '+998901234567',
-    email: null,
     passwordHash: 'unused',
     role: Role.ADMIN,
     status: UserStatus.ACTIVE,

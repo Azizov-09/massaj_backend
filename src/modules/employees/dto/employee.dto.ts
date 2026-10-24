@@ -3,7 +3,6 @@ import { EmployeeStatus } from '@prisma/client';
 import { Type } from 'class-transformer';
 import {
   IsDateString,
-  IsEmail,
   IsEnum,
   IsNumber,
   IsOptional,
@@ -27,11 +26,6 @@ export class CreateEmployeeDto {
   @IsString()
   @Length(9, 32)
   phone!: string;
-
-  @ApiPropertyOptional({ description: 'Corporate email address' })
-  @IsOptional()
-  @IsEmail()
-  email?: string;
 
   @ApiPropertyOptional({ description: 'Date of joining (ISO 8601)' })
   @IsOptional()
@@ -70,11 +64,6 @@ export class UpdateEmployeeDto {
   @IsString()
   @Length(9, 32)
   phone?: string;
-
-  @ApiPropertyOptional({ description: 'Corporate email address' })
-  @IsOptional()
-  @IsEmail()
-  email?: string;
 
   @ApiPropertyOptional({ enum: EmployeeStatus, description: 'Employee status' })
   @IsOptional()

@@ -1,7 +1,6 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Role } from '@prisma/client';
 import {
-  IsEmail,
   IsEnum,
   IsIn,
   IsOptional,
@@ -20,11 +19,6 @@ export class CreateAdminDto {
   @IsString()
   @Length(9, 32)
   phone!: string;
-
-  @ApiPropertyOptional({ description: 'Email address (optional)' })
-  @IsOptional()
-  @IsEmail()
-  email?: string;
 
   @ApiProperty({ enum: [Role.SUPER_ADMIN, Role.ADMIN], description: 'Admin role' })
   @IsEnum(Role)
@@ -56,20 +50,16 @@ export class UpdateAdminDto {
   @Length(9, 32)
   phone?: string;
 
-  @ApiPropertyOptional({ description: 'Email address' })
-  @IsOptional()
-  @IsEmail()
-  email?: string;
-
   @ApiPropertyOptional({ enum: [Role.SUPER_ADMIN, Role.ADMIN], description: 'Admin role' })
   @IsOptional()
   @IsEnum(Role)
   @IsIn([Role.SUPER_ADMIN, Role.ADMIN])
   role?: Role;
 
-  @ApiPropertyOptional({ enum: ['ACTIVE', 'INACTIVE', 'BLOCKED'], description: 'User status' })
+  @ApiPropertyOptional({ enum: ['ACTIVE', 'INACTIVE', 'BLOCKED', 'ARCHIVED'], description: 'User status' })
   @IsOptional()
   @IsString()
+  @IsIn(['ACTIVE', 'INACTIVE', 'BLOCKED', 'ARCHIVED'])
   status?: string;
 
   @ApiPropertyOptional({

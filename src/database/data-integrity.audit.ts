@@ -13,6 +13,34 @@ type DiagnosticCheck = {
 
 const checks: DiagnosticCheck[] = [
   {
+    name: 'invalidUserPhoneIdentities',
+    description: 'User accounts whose required identity phone is missing or not canonical +998XXXXXXXXX.',
+    query: Prisma.sql`
+      SELECT u."id"::text AS identifier, COUNT(*) OVER()::int AS total
+      FROM "User" u
+      WHERE u."phone" IS NULL OR BTRIM(u."phone") = '' OR u."phone" !~ '^\\+998[0-9]{9}$'
+      ORDER BY u."id" LIMIT 100`,
+  },
+  {
+    name: 'invalidEmployeePhones',
+    description: 'Employee records whose phone is missing or not canonical +998XXXXXXXXX.',
+    query: Prisma.sql`
+      SELECT e."id"::text AS identifier, COUNT(*) OVER()::int AS total
+      FROM "Employee" e
+      WHERE e."phone" IS NULL OR BTRIM(e."phone") = '' OR e."phone" !~ '^\\+998[0-9]{9}$'
+      ORDER BY e."id" LIMIT 100`,
+  },
+  {
+    name: 'duplicateEmployeePhones',
+    description: 'Employee phone identities that would violate the new unique constraint.',
+    query: Prisma.sql`
+      SELECT e."phone" AS identifier, COUNT(*) OVER()::int AS total
+      FROM "Employee" e
+      GROUP BY e."phone"
+      HAVING COUNT(*) > 1
+      ORDER BY e."phone" LIMIT 100`,
+  },
+  {
     name: 'orphanAssessments',
     description: 'Assessments whose child or specialist relation is missing.',
     query: Prisma.sql`

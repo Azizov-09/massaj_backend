@@ -1,10 +1,11 @@
 import {
+  BadRequestException,
   ConflictException,
   ForbiddenException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { Role, UserStatus } from '@prisma/client';
+import { Prisma, Role, UserStatus } from '@prisma/client';
 import * as argon2 from 'argon2';
 import { PrismaService } from '../../database/prisma.service';
 import { normalizeUzbekPhone } from '../../common/utils/phone.util';
@@ -19,7 +20,7 @@ export class AdminsService {
     try {
       phone = normalizeUzbekPhone(dto.phone);
     } catch {
-      throw new ConflictException('Invalid phone number format');
+      throw new BadRequestException({ field: 'phone', message: 'Phone must be a valid Uzbekistan phone number' });
     }
 
     try {
@@ -28,7 +29,6 @@ export class AdminsService {
           data: {
             fullName: dto.fullName,
             phone,
-            email: dto.email,
             role: dto.role,
             passwordHash: await argon2.hash(dto.password, { type: argon2.argon2id }),
             admin: { create: {} },
@@ -37,7 +37,6 @@ export class AdminsService {
             id: true,
             fullName: true,
             phone: true,
-            email: true,
             role: true,
             status: true,
             createdAt: true,
@@ -75,7 +74,7 @@ export class AdminsService {
     const { page, limit, role, status, search } = params;
     const where = {
       role: role ?? { in: [Role.SUPER_ADMIN, Role.ADMIN] },
-      ...(status && { status }),
+      ...(status ? { status } : { status: { not: UserStatus.ARCHIVED } }),
       ...(search && {
         OR: [
           { fullName: { contains: search, mode: 'insensitive' as const } },
@@ -93,7 +92,6 @@ export class AdminsService {
           id: true,
           fullName: true,
           phone: true,
-          email: true,
           role: true,
           status: true,
           lastLoginAt: true,
@@ -115,7 +113,6 @@ export class AdminsService {
         id: true,
         fullName: true,
         phone: true,
-        email: true,
         role: true,
         status: true,
         lastLoginAt: true,
@@ -137,7 +134,7 @@ export class AdminsService {
       try {
         phone = normalizeUzbekPhone(dto.phone);
       } catch {
-        throw new ConflictException('Invalid phone number format');
+        throw new BadRequestException({ field: 'phone', message: 'Phone must be a valid Uzbekistan phone number' });
       }
     }
 
@@ -149,7 +146,8 @@ export class AdminsService {
     let statusVal: UserStatus | undefined;
     if (dto.status) {
       if (dto.status === 'ACTIVE') statusVal = UserStatus.ACTIVE;
-      else if (dto.status === 'INACTIVE' || dto.status === 'ARCHIVED') statusVal = UserStatus.INACTIVE;
+      else if (dto.status === 'INACTIVE') statusVal = UserStatus.INACTIVE;
+      else if (dto.status === 'ARCHIVED') statusVal = UserStatus.ARCHIVED;
       else if (dto.status === 'BLOCKED') statusVal = UserStatus.BLOCKED;
     }
 
@@ -161,21 +159,21 @@ export class AdminsService {
       current.role === Role.SUPER_ADMIN &&
       ((dto.role !== undefined && dto.role !== Role.SUPER_ADMIN) ||
         (statusVal !== undefined && statusVal !== UserStatus.ACTIVE));
-    if (removesSuperAdmin) {
-      const activeSuperAdmins = await this.prisma.user.count({
-        where: { role: Role.SUPER_ADMIN, status: UserStatus.ACTIVE },
-      });
-      if (activeSuperAdmins <= 1) throw new ForbiddenException('The last active SUPER_ADMIN cannot be demoted or disabled');
-    }
-
     try {
       return await this.prisma.$transaction(async (tx) => {
+        if (removesSuperAdmin) {
+          const activeSuperAdmins = await tx.user.count({
+            where: { role: Role.SUPER_ADMIN, status: UserStatus.ACTIVE },
+          });
+          if (activeSuperAdmins <= 1) {
+            throw new ForbiddenException('The last active SUPER_ADMIN cannot be demoted or disabled');
+          }
+        }
         const securityChanged = Boolean(dto.role || statusVal || passwordHash);
         const updated = await tx.user.update({
           where: { id },
           data: {
             ...(dto.fullName && { fullName: dto.fullName }),
-            ...(dto.email !== undefined && { email: dto.email }),
             ...(phone && { phone }),
             ...(dto.role && { role: dto.role }),
             ...(statusVal && { status: statusVal }),
@@ -186,7 +184,6 @@ export class AdminsService {
             id: true,
             fullName: true,
             phone: true,
-            email: true,
             role: true,
             status: true,
             updatedAt: true,
@@ -208,60 +205,33 @@ export class AdminsService {
           },
         });
         return updated;
-      });
+      }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
     } catch (err: unknown) {
       if (typeof err === 'object' && err !== null && 'code' in err && err.code === 'P2002') {
-        throw new ConflictException('Phone number or email already in use');
+        throw new ConflictException('Phone number is already registered');
       }
       throw err;
     }
   }
 
   async archive(id: string, actorId: string) {
-    const admin = await this.findOne(id);
-    if (id === actorId) {
-      throw new ForbiddenException('You cannot archive your own account');
-    }
-
-    const updated = await this.prisma.$transaction(async (tx) => {
-      const u = await tx.user.update({
-        where: { id },
-        data: {
-          status: UserStatus.BLOCKED,
-          tokenVersion: { increment: 1 },
-        },
-        select: { id: true, fullName: true, status: true, updatedAt: true },
-      });
-
-      await tx.userSession.updateMany({
-        where: { userId: id, revokedAt: null },
-        data: { revokedAt: new Date() },
-      });
-
-      await tx.activityLog.create({
-        data: {
-          userId: actorId,
-          action: 'ADMIN_ARCHIVED',
-          entity: 'User',
-          entityId: id,
-          description: `Archived admin: ${admin.fullName} and revoked all active sessions`,
-        },
-      });
-
-      return u;
-    });
-
-    return updated;
+    return this.transitionStatus(id, UserStatus.ARCHIVED, actorId, 'ADMIN_ARCHIVED');
   }
 
-  private async log(
-    userId: string,
-    action: string,
-    entity: string,
-    entityId: string,
-    description: string,
-  ): Promise<void> {
-    await this.prisma.activityLog.create({ data: { userId, action, entity, entityId, description } });
+  async activate(id: string, actorId: string) {
+    return this.transitionStatus(id, UserStatus.ACTIVE, actorId, 'ADMIN_ACTIVATED');
+  }
+
+  async deactivate(id: string, actorId: string) {
+    return this.transitionStatus(id, UserStatus.INACTIVE, actorId, 'ADMIN_DEACTIVATED');
+  }
+
+  async restore(id: string, actorId: string) {
+    const admin = await this.findOne(id);
+    if (admin.status !== UserStatus.ARCHIVED) {
+      throw new ConflictException('Only an archived admin can be restored');
+    }
+    return this.transitionStatus(id, UserStatus.ACTIVE, actorId, 'ADMIN_RESTORED');
   }
 
   private isUniqueError(error: unknown): boolean {
@@ -271,5 +241,50 @@ export class AdminsService {
       'code' in error &&
       error.code === 'P2002'
     );
+  }
+
+  private async transitionStatus(
+    id: string,
+    status: 'ACTIVE' | 'INACTIVE' | 'ARCHIVED',
+    actorId: string,
+    action: string,
+  ) {
+    const admin = await this.findOne(id);
+    if (id === actorId && status !== UserStatus.ACTIVE) {
+      throw new ForbiddenException('You cannot deactivate or archive your own account');
+    }
+    if (admin.status === UserStatus.ARCHIVED && action !== 'ADMIN_RESTORED') {
+      throw new ConflictException('Archived admin must be restored before changing status');
+    }
+    return this.prisma.$transaction(async (tx) => {
+      if (admin.role === Role.SUPER_ADMIN && status !== UserStatus.ACTIVE) {
+        const activeSuperAdmins = await tx.user.count({
+          where: { role: Role.SUPER_ADMIN, status: UserStatus.ACTIVE },
+        });
+        if (activeSuperAdmins <= 1) {
+          throw new ForbiddenException('The last active SUPER_ADMIN cannot be disabled or archived');
+        }
+      }
+      const updated = await tx.user.update({
+        where: { id },
+        data: { status, tokenVersion: { increment: 1 } },
+        select: { id: true, fullName: true, phone: true, role: true, status: true, updatedAt: true },
+      });
+      await tx.userSession.updateMany({
+        where: { userId: id, revokedAt: null },
+        data: { revokedAt: new Date() },
+      });
+      await tx.activityLog.create({
+        data: {
+          userId: actorId,
+          action,
+          entity: 'User',
+          entityId: id,
+          description: `Changed admin status from ${admin.status} to ${status} and revoked active sessions`,
+          metadata: { from: admin.status, to: status },
+        },
+      });
+      return updated;
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
   }
 }

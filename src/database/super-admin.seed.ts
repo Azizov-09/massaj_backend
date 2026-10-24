@@ -13,7 +13,6 @@ export async function seedSuperAdmin(prisma: PrismaClient): Promise<void> {
   const rawPhone = process.env.SUPER_ADMIN_PHONE;
   const password = process.env.SUPER_ADMIN_PASSWORD;
   const fullName = process.env.SUPER_ADMIN_FULL_NAME;
-  const email = process.env.SUPER_ADMIN_EMAIL;
 
   if (!rawPhone || !password || !fullName) {
     logger.log('Super Admin bootstrap credentials are not configured; automatic bootstrap skipped.');
@@ -42,7 +41,6 @@ export async function seedSuperAdmin(prisma: PrismaClient): Promise<void> {
       data: {
         fullName,
         phone,
-        email,
         passwordHash,
         role: Role.SUPER_ADMIN,
         status: UserStatus.ACTIVE,

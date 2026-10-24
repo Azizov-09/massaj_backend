@@ -1,5 +1,5 @@
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
-import { AppointmentStatus, Prisma, Role, ServiceStatus, SpecialistStatus } from '@prisma/client';
+import { AppointmentStatus, Prisma, Role, ServiceStatus, SpecialistStatus, UserStatus } from '@prisma/client';
 import { RequestUser } from '../../common/types/request-user.type';
 import { PrismaService } from '../../database/prisma.service';
 import { NotificationsService } from '../notifications/notifications.service';
@@ -153,19 +153,36 @@ export class AppointmentsService {
   private async validateInput(dto: Pick<CreateAppointmentDto, 'childId' | 'parentId' | 'specialistId' | 'serviceId' | 'startAt'>) {
     const startAt = new Date(dto.startAt);
     if (Number.isNaN(startAt.getTime())) throw new BadRequestException('Invalid appointment start time');
-    const [relation, child, specialist, service] = await Promise.all([
+    const [relation, child, specialist, service, settings] = await Promise.all([
       this.prisma.childParent.findUnique({
         where: { childId_parentId: { childId: dto.childId, parentId: dto.parentId } },
-        select: { parent: { select: { userId: true } } },
+        select: { parent: { select: { userId: true, user: { select: { status: true } } } } },
       }),
       this.prisma.child.findUnique({ where: { id: dto.childId }, select: { status: true } }),
-      this.prisma.specialist.findUnique({ where: { id: dto.specialistId }, select: { status: true } }),
+      this.prisma.specialist.findUnique({
+        where: { id: dto.specialistId },
+        select: { status: true, workingDays: true, user: { select: { status: true } } },
+      }),
       this.prisma.service.findUnique({ where: { id: dto.serviceId }, select: { status: true, durationMinutes: true } }),
+      this.prisma.centerSettings.findFirst({ orderBy: { createdAt: 'asc' }, select: { timezone: true } }),
     ]);
     if (!relation) throw new BadRequestException('Parent must be related to the child');
+    if (relation.parent.user.status !== UserStatus.ACTIVE) {
+      throw new BadRequestException('Parent account must be active');
+    }
     if (!child || child.status !== 'ACTIVE') throw new BadRequestException('Child must be active');
-    if (!specialist || specialist.status !== SpecialistStatus.ACTIVE) throw new BadRequestException('Specialist must be active');
+    if (
+      !specialist ||
+      specialist.status !== SpecialistStatus.ACTIVE ||
+      specialist.user.status !== UserStatus.ACTIVE
+    ) {
+      throw new BadRequestException('Specialist must be active');
+    }
     if (!service || service.status !== ServiceStatus.ACTIVE) throw new BadRequestException('Service must be active');
+    const isoWeekday = this.isoWeekday(startAt, settings?.timezone ?? 'Asia/Tashkent');
+    if (!specialist.workingDays.includes(isoWeekday)) {
+      throw new ConflictException(`Specialist is not available on ISO weekday ${isoWeekday}`);
+    }
     return {
       startAt,
       endAt: new Date(startAt.getTime() + service.durationMinutes * 60_000),
@@ -212,5 +229,25 @@ export class AppointmentsService {
     }
     if (range.gte && range.lte && range.gte > range.lte) throw new BadRequestException('from must be before or equal to to');
     return range;
+  }
+
+  private isoWeekday(value: Date, timeZone: string): number {
+    try {
+      const weekday = new Intl.DateTimeFormat('en-US', { weekday: 'short', timeZone }).format(value);
+      const weekdays: Record<string, number> = {
+        Mon: 1,
+        Tue: 2,
+        Wed: 3,
+        Thu: 4,
+        Fri: 5,
+        Sat: 6,
+        Sun: 7,
+      };
+      const result = weekdays[weekday];
+      if (!result) throw new Error('Unknown weekday');
+      return result;
+    } catch {
+      throw new BadRequestException(`Invalid center timezone configuration: ${timeZone}`);
+    }
   }
 }

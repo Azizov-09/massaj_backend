@@ -14,7 +14,6 @@ describe('seedSuperAdmin', () => {
     process.env.SUPER_ADMIN_PHONE = '+998901000001';
     process.env.SUPER_ADMIN_PASSWORD = 'AdminPassword123!';
     process.env.SUPER_ADMIN_FULL_NAME = 'Super Admin Test';
-    process.env.SUPER_ADMIN_EMAIL = 'super@test.uz';
 
     mockPrisma = {
       user: {
@@ -48,7 +47,6 @@ describe('seedSuperAdmin', () => {
       data: {
         fullName: 'Super Admin Test',
         phone: '+998901000001',
-        email: 'super@test.uz',
         passwordHash: 'hashed_super_admin_pass',
         role: Role.SUPER_ADMIN,
         status: UserStatus.ACTIVE,

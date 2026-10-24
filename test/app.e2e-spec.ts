@@ -28,6 +28,10 @@ describe('Rehabilitation Center CRM (Comprehensive E2E Tests)', () => {
   let serviceId: string;
   let appointmentId: string;
   let paymentId: string;
+  let lifecycleParentId: string;
+  let lifecycleParentUserId: string;
+  let lifecycleSpecialistId: string;
+  let lifecycleAdminUserId: string;
 
   beforeAll(async () => {
     const moduleFixture: TestingModule = await Test.createTestingModule({
@@ -62,6 +66,11 @@ describe('Rehabilitation Center CRM (Comprehensive E2E Tests)', () => {
       '+998900000004',
       '+998900000005',
       '+998900000006',
+      '+998900000007',
+      '+998900000008',
+      '+998900000009',
+      '+998900000010',
+      '+998900000011',
     ];
     await prisma.notificationDelivery.deleteMany({
       where: { notification: { user: { phone: { in: testPhones } } } },
@@ -99,6 +108,7 @@ describe('Rehabilitation Center CRM (Comprehensive E2E Tests)', () => {
     await prisma.admin.deleteMany({
       where: { user: { phone: { in: testPhones } } },
     });
+    await prisma.employee.deleteMany({ where: { phone: { in: testPhones } } });
     await prisma.user.deleteMany({
       where: { phone: { in: testPhones } },
     });
@@ -906,6 +916,255 @@ describe('Rehabilitation Center CRM (Comprehensive E2E Tests)', () => {
 
       expect(res.body.items).toBeDefined();
       expect(res.body.meta).toBeDefined();
+    });
+  });
+
+  describe('Phone-only user management lifecycle', () => {
+    it('creates and updates a Parent without email, normalizes phone, and returns 409 for duplicates', async () => {
+      const rejectedEmail = await request(app.getHttpServer())
+        .post('/api/v1/parents')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({
+          fullName: 'Email Must Be Rejected',
+          phone: '+998900000010',
+          email: 'removed@example.test',
+          password: testPassword,
+        })
+        .expect(400);
+      expect(rejectedEmail.body.message).toContain('property email should not exist');
+
+      const created = await request(app.getHttpServer())
+        .post('/api/v1/parents')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({
+          fullName: 'Lifecycle Parent',
+          phone: '90 000 00 07',
+          password: testPassword,
+          address: 'Tashkent',
+        })
+        .expect(201);
+      lifecycleParentId = created.body.id;
+      lifecycleParentUserId = created.body.userId;
+      expect(created.body.user.phone).toBe('+998900000007');
+      expect(created.body.user.email).toBeUndefined();
+
+      const updated = await request(app.getHttpServer())
+        .patch(`/api/v1/parents/${lifecycleParentId}`)
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({ phone: '90 000 00 10', fullName: 'Lifecycle Parent Updated' })
+        .expect(200);
+      expect(updated.body.user.phone).toBe('+998900000010');
+
+      await request(app.getHttpServer())
+        .patch(`/api/v1/parents/${lifecycleParentId}`)
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({ phone: '+998900000004' })
+        .expect(409);
+    });
+
+    it('deactivates, activates, archives and restores Parent while preserving relations and revoking sessions', async () => {
+      const login = await request(app.getHttpServer())
+        .post('/api/v1/auth/login')
+        .send({ phone: '+998900000010', password: testPassword })
+        .expect(200);
+
+      await request(app.getHttpServer())
+        .patch(`/api/v1/parents/${lifecycleParentId}/status`)
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({ status: 'INACTIVE' })
+        .expect(200);
+      await request(app.getHttpServer())
+        .get('/api/v1/parent/me')
+        .set('Authorization', `Bearer ${login.body.accessToken}`)
+        .expect(401);
+
+      await request(app.getHttpServer())
+        .patch(`/api/v1/parents/${lifecycleParentId}/status`)
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({ status: 'ACTIVE' })
+        .expect(200);
+      await request(app.getHttpServer())
+        .post(`/api/v1/parents/${lifecycleParentId}/archive`)
+        .set('Authorization', `Bearer ${adminToken}`)
+        .expect(200);
+      expect((await prisma.user.findUniqueOrThrow({ where: { id: lifecycleParentUserId } })).status).toBe('ARCHIVED');
+      await request(app.getHttpServer())
+        .post(`/api/v1/parents/${lifecycleParentId}/restore`)
+        .set('Authorization', `Bearer ${adminToken}`)
+        .expect(200);
+      expect((await prisma.user.findUniqueOrThrow({ where: { id: lifecycleParentUserId } })).status).toBe('ACTIVE');
+    });
+
+    it('preserves linked children, payments, debt ledger, and clinical history when archiving Parent', async () => {
+      const before = {
+        children: await prisma.childParent.count({ where: { parentId: parentProfileId } }),
+        payments: await prisma.payment.count({ where: { parentId: parentProfileId } }),
+        transactions: await prisma.transaction.count({ where: { parentId: parentProfileId } }),
+        appointments: await prisma.appointment.count({ where: { parentId: parentProfileId } }),
+      };
+      await request(app.getHttpServer())
+        .post(`/api/v1/parents/${parentProfileId}/archive`)
+        .set('Authorization', `Bearer ${adminToken}`)
+        .expect(200);
+      expect(await prisma.childParent.count({ where: { parentId: parentProfileId } })).toBe(before.children);
+      expect(await prisma.payment.count({ where: { parentId: parentProfileId } })).toBe(before.payments);
+      expect(await prisma.transaction.count({ where: { parentId: parentProfileId } })).toBe(before.transactions);
+      expect(await prisma.appointment.count({ where: { parentId: parentProfileId } })).toBe(before.appointments);
+      await request(app.getHttpServer())
+        .post(`/api/v1/parents/${parentProfileId}/restore`)
+        .set('Authorization', `Bearer ${adminToken}`)
+        .expect(200);
+    });
+
+    it('supports empty Specialist bio, ISO weekdays, status lifecycle, and scheduling restrictions', async () => {
+      const created = await request(app.getHttpServer())
+        .post('/api/v1/specialists')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({
+          fullName: 'Lifecycle Specialist',
+          phone: '+998900000008',
+          password: testPassword,
+          specialization: 'Massage',
+          experienceYears: 3,
+          bio: '',
+          workingDays: [],
+        })
+        .expect(201);
+      lifecycleSpecialistId = created.body.id;
+      expect(created.body.bio).toBeNull();
+      expect(created.body.workingDays).toEqual([]);
+
+      await request(app.getHttpServer())
+        .post('/api/v1/appointments')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({
+          childId,
+          parentId: parentProfileId,
+          specialistId: lifecycleSpecialistId,
+          serviceId,
+          startAt: '2030-01-07T09:00:00.000Z',
+        })
+        .expect(409);
+
+      const updatedSchedule = await request(app.getHttpServer())
+        .patch(`/api/v1/specialists/${lifecycleSpecialistId}`)
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({ workingDays: [7, 6, 5, 4, 3, 2, 1] })
+        .expect(200);
+      expect(updatedSchedule.body.workingDays).toEqual([1, 2, 3, 4, 5, 6, 7]);
+
+      const login = await request(app.getHttpServer())
+        .post('/api/v1/auth/login')
+        .send({ phone: '+998900000008', password: testPassword })
+        .expect(200);
+      await request(app.getHttpServer())
+        .patch(`/api/v1/specialists/${lifecycleSpecialistId}/status`)
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({ status: 'INACTIVE' })
+        .expect(200);
+      await request(app.getHttpServer())
+        .get('/api/v1/specialist/me')
+        .set('Authorization', `Bearer ${login.body.accessToken}`)
+        .expect(401);
+      await request(app.getHttpServer())
+        .patch(`/api/v1/specialists/${lifecycleSpecialistId}/status`)
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({ status: 'ACTIVE' })
+        .expect(200);
+      await request(app.getHttpServer())
+        .post(`/api/v1/specialists/${lifecycleSpecialistId}/archive`)
+        .set('Authorization', `Bearer ${adminToken}`)
+        .expect(200);
+      await request(app.getHttpServer())
+        .post(`/api/v1/specialists/${lifecycleSpecialistId}/restore`)
+        .set('Authorization', `Bearer ${adminToken}`)
+        .expect(200);
+    });
+
+    it('manages Admin lifecycle and blocks ordinary Admin from changing SUPER_ADMIN', async () => {
+      const created = await request(app.getHttpServer())
+        .post('/api/v1/admins')
+        .set('Authorization', `Bearer ${superAdminToken}`)
+        .send({
+          fullName: 'Lifecycle Admin',
+          phone: '+998900000009',
+          password: testPassword,
+          role: 'ADMIN',
+        })
+        .expect(201);
+      lifecycleAdminUserId = created.body.id;
+      expect(created.body.email).toBeUndefined();
+
+      const superAdmin = await prisma.user.findFirstOrThrow({ where: { role: Role.SUPER_ADMIN } });
+      await request(app.getHttpServer())
+        .post(`/api/v1/admins/${superAdmin.id}/deactivate`)
+        .set('Authorization', `Bearer ${adminToken}`)
+        .expect(403);
+      await request(app.getHttpServer())
+        .post(`/api/v1/admins/${lifecycleAdminUserId}/deactivate`)
+        .set('Authorization', `Bearer ${superAdminToken}`)
+        .expect(200);
+      await request(app.getHttpServer())
+        .post('/api/v1/auth/login')
+        .send({ phone: '+998900000009', password: testPassword })
+        .expect(401);
+      await request(app.getHttpServer())
+        .post(`/api/v1/admins/${lifecycleAdminUserId}/activate`)
+        .set('Authorization', `Bearer ${superAdminToken}`)
+        .expect(200);
+      await request(app.getHttpServer())
+        .post(`/api/v1/admins/${lifecycleAdminUserId}/archive`)
+        .set('Authorization', `Bearer ${superAdminToken}`)
+        .expect(200);
+      await request(app.getHttpServer())
+        .post(`/api/v1/admins/${lifecycleAdminUserId}/restore`)
+        .set('Authorization', `Bearer ${superAdminToken}`)
+        .expect(200);
+    });
+
+    it('manages phone-only Employee lifecycle and rejects duplicate phones', async () => {
+      const created = await request(app.getHttpServer())
+        .post('/api/v1/employees')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({
+          fullName: 'Lifecycle Employee',
+          position: 'Receptionist',
+          phone: '90 000 00 11',
+        })
+        .expect(201);
+      expect(created.body.phone).toBe('+998900000011');
+      expect(created.body.email).toBeUndefined();
+
+      await request(app.getHttpServer())
+        .post('/api/v1/employees')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({
+          fullName: 'Duplicate Employee',
+          position: 'Receptionist',
+          phone: '+998900000011',
+        })
+        .expect(409);
+      await request(app.getHttpServer())
+        .post(`/api/v1/employees/${created.body.id}/deactivate`)
+        .set('Authorization', `Bearer ${adminToken}`)
+        .expect(200);
+      await request(app.getHttpServer())
+        .post(`/api/v1/employees/${created.body.id}/activate`)
+        .set('Authorization', `Bearer ${adminToken}`)
+        .expect(200);
+      await request(app.getHttpServer())
+        .post(`/api/v1/employees/${created.body.id}/archive`)
+        .set('Authorization', `Bearer ${adminToken}`)
+        .expect(200);
+      const list = await request(app.getHttpServer())
+        .get('/api/v1/employees')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .expect(200);
+      expect(list.body.items.some((item: { id: string }) => item.id === created.body.id)).toBe(false);
+      await request(app.getHttpServer())
+        .post(`/api/v1/employees/${created.body.id}/restore`)
+        .set('Authorization', `Bearer ${adminToken}`)
+        .expect(200);
     });
   });
 });

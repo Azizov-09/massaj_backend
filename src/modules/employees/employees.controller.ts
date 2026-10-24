@@ -121,6 +121,30 @@ export class EmployeesController {
     return this.employees.archive(id, user.id);
   }
 
+  @Post(':id/activate')
+  @HttpCode(200)
+  @ApiOperation({ summary: 'Activate Employee' })
+  @ApiResponse({ status: 200, description: 'Employee activated.' })
+  activate(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() user: RequestUser) {
+    return this.employees.activate(id, user.id);
+  }
+
+  @Post(':id/deactivate')
+  @HttpCode(200)
+  @ApiOperation({ summary: 'Deactivate Employee' })
+  @ApiResponse({ status: 200, description: 'Employee deactivated.' })
+  deactivate(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() user: RequestUser) {
+    return this.employees.deactivate(id, user.id);
+  }
+
+  @Post(':id/restore')
+  @HttpCode(200)
+  @ApiOperation({ summary: 'Restore Archived Employee' })
+  @ApiResponse({ status: 200, description: 'Employee restored and activated.' })
+  restore(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() user: RequestUser) {
+    return this.employees.restore(id, user.id);
+  }
+
   @Delete(':id')
   @HttpCode(204)
   @Roles(Role.SUPER_ADMIN)

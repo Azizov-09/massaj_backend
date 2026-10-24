@@ -60,4 +60,20 @@ describe('clinical migration and Goals removal safety', () => {
     expect(source).not.toMatch(/\.\s*(create|createMany|update|updateMany|delete|deleteMany|upsert)\s*\(/i);
     expect(source).not.toMatch(/\$executeRaw|Prisma\.sql`\s*(INSERT|UPDATE|DELETE|DROP|TRUNCATE|ALTER)\b/i);
   });
+
+  it('blocks the phone-only identity migration until legacy identities are safe', () => {
+    const sql = read(
+      'prisma/migrations/20261024120000_phone_identity_and_user_lifecycle/migration.sql',
+    );
+    const preflight = sql.indexOf('PHONE_IDENTITY_PREFLIGHT');
+    const dropUserEmail = sql.indexOf('ALTER TABLE "User" DROP COLUMN');
+    const dropEmployeeEmail = sql.indexOf('ALTER TABLE "Employee" DROP COLUMN');
+
+    expect(preflight).toBeGreaterThanOrEqual(0);
+    expect(dropUserEmail).toBeGreaterThan(preflight);
+    expect(dropEmployeeEmail).toBeGreaterThan(preflight);
+    expect(sql).toContain('duplicate User phones must be resolved');
+    expect(sql).toContain('duplicate Employee phones must be resolved');
+    expect(sql).toContain('CREATE UNIQUE INDEX "Employee_phone_key"');
+  });
 });

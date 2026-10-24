@@ -1,5 +1,5 @@
-import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
-import { Role, SpecialistStatus } from '@prisma/client';
+import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import { Role, SpecialistStatus, UserStatus } from '@prisma/client';
 import * as argon2 from 'argon2';
 import { PrismaService } from '../../database/prisma.service';
 import { normalizeUzbekPhone } from '../../common/utils/phone.util';
@@ -14,8 +14,9 @@ export class ProfilesService {
     try {
       phone = normalizeUzbekPhone(dto.phone);
     } catch {
-      throw new ConflictException('Invalid phone number');
+      throw new BadRequestException({ field: 'phone', message: 'Phone must be a valid Uzbekistan phone number' });
     }
+    const passwordHash = await argon2.hash(dto.password, { type: argon2.argon2id });
 
     try {
       return await this.prisma.$transaction(async (tx) => {
@@ -24,7 +25,7 @@ export class ProfilesService {
             fullName: dto.fullName,
             phone,
             role: Role.PARENT,
-            passwordHash: await argon2.hash(dto.password, { type: argon2.argon2id }),
+            passwordHash,
             parent: {
               create: {
                 address: dto.address,
@@ -35,7 +36,6 @@ export class ProfilesService {
             id: true,
             fullName: true,
             phone: true,
-            email: true,
             role: true,
             status: true,
             createdAt: true,
@@ -71,7 +71,6 @@ export class ProfilesService {
             id: user.id,
             fullName: user.fullName,
             phone: user.phone,
-            email: user.email,
             role: user.role,
             status: user.status,
             createdAt: user.createdAt,
@@ -89,8 +88,10 @@ export class ProfilesService {
     try {
       phone = normalizeUzbekPhone(dto.phone);
     } catch {
-      throw new ConflictException('Invalid phone number');
+      throw new BadRequestException({ field: 'phone', message: 'Phone must be a valid Uzbekistan phone number' });
     }
+    const passwordHash = await argon2.hash(dto.password, { type: argon2.argon2id });
+    const workingDays = this.canonicalWorkingDays(dto.workingDays);
 
     try {
       return await this.prisma.$transaction(async (tx) => {
@@ -99,12 +100,13 @@ export class ProfilesService {
             fullName: dto.fullName,
             phone,
             role: Role.SPECIALIST,
-            passwordHash: await argon2.hash(dto.password, { type: argon2.argon2id }),
+            passwordHash,
             specialist: {
               create: {
                 specialization: dto.specialization,
                 experienceYears: dto.experienceYears,
-                bio: dto.bio,
+                bio: dto.bio ?? null,
+                workingDays,
               },
             },
           },
@@ -112,7 +114,6 @@ export class ProfilesService {
             id: true,
             fullName: true,
             phone: true,
-            email: true,
             role: true,
             status: true,
             createdAt: true,
@@ -122,6 +123,7 @@ export class ProfilesService {
                 specialization: true,
                 experienceYears: true,
                 bio: true,
+                workingDays: true,
                 status: true,
                 createdAt: true,
                 updatedAt: true,
@@ -147,6 +149,7 @@ export class ProfilesService {
           specialization: user.specialist!.specialization,
           experienceYears: user.specialist!.experienceYears,
           bio: user.specialist!.bio,
+          workingDays: user.specialist!.workingDays,
           status: user.specialist!.status,
           createdAt: user.specialist!.createdAt,
           updatedAt: user.specialist!.updatedAt,
@@ -154,7 +157,6 @@ export class ProfilesService {
             id: user.id,
             fullName: user.fullName,
             phone: user.phone,
-            email: user.email,
             role: user.role,
             status: user.status,
             createdAt: user.createdAt,
@@ -168,32 +170,36 @@ export class ProfilesService {
   }
 
   async listParents(page: number, limit: number) {
+    const where = { user: { status: { not: UserStatus.ARCHIVED } } };
     const [items, total] = await this.prisma.$transaction([
       this.prisma.parent.findMany({
+        where,
         skip: (page - 1) * limit,
         take: limit,
         include: {
-          user: { select: { id: true, fullName: true, phone: true, email: true, status: true, createdAt: true } },
+          user: { select: { id: true, fullName: true, phone: true, status: true, createdAt: true } },
           _count: { select: { children: true } },
         },
         orderBy: { createdAt: 'desc' },
       }),
-      this.prisma.parent.count(),
+      this.prisma.parent.count({ where }),
     ]);
     return { items, meta: { page, limit, total } };
   }
 
   async listSpecialists(page: number, limit: number) {
+    const where = { status: { not: SpecialistStatus.ARCHIVED } };
     const [items, total] = await this.prisma.$transaction([
       this.prisma.specialist.findMany({
+        where,
         skip: (page - 1) * limit,
         take: limit,
         include: {
-          user: { select: { id: true, fullName: true, phone: true, email: true, status: true, createdAt: true } },
+          user: { select: { id: true, fullName: true, phone: true, status: true, createdAt: true } },
         },
         orderBy: { createdAt: 'desc' },
       }),
-      this.prisma.specialist.count(),
+      this.prisma.specialist.count({ where }),
     ]);
     return { items, meta: { page, limit, total } };
   }
@@ -202,7 +208,7 @@ export class ProfilesService {
     const parent = await this.prisma.parent.findUnique({
       where: { id },
       include: {
-        user: { select: { id: true, fullName: true, phone: true, email: true, status: true, createdAt: true } },
+        user: { select: { id: true, fullName: true, phone: true, status: true, createdAt: true } },
         children: { include: { child: true } },
       },
     });
@@ -214,7 +220,7 @@ export class ProfilesService {
     const specialist = await this.prisma.specialist.findUnique({
       where: { id },
       include: {
-        user: { select: { id: true, fullName: true, phone: true, email: true, status: true, createdAt: true } },
+        user: { select: { id: true, fullName: true, phone: true, status: true, createdAt: true } },
       },
     });
     if (!specialist) throw new NotFoundException('Specialist not found');
@@ -222,51 +228,139 @@ export class ProfilesService {
   }
 
   async updateParent(id: string, dto: UpdateParentDto, actorId: string) {
-    await this.getParent(id);
-    const parent = await this.prisma.parent.update({
+    let phone: string | undefined;
+    try {
+      phone = dto.phone === undefined ? undefined : normalizeUzbekPhone(dto.phone);
+    } catch {
+      throw new BadRequestException({ field: 'phone', message: 'Phone must be a valid Uzbekistan phone number' });
+    }
+
+    try {
+      return await this.prisma.$transaction(async (tx) => {
+        const existing = await tx.parent.findUnique({ where: { id }, select: { userId: true } });
+        if (!existing) throw new NotFoundException('Parent not found');
+        const parent = await tx.parent.update({
+          where: { id },
+          data: {
+            address: dto.address,
+            user:
+              dto.fullName !== undefined || phone !== undefined
+                ? { update: { fullName: dto.fullName, phone } }
+                : undefined,
+          },
+          include: {
+            user: { select: { id: true, fullName: true, phone: true, status: true } },
+          },
+        });
+        await tx.activityLog.create({
+          data: {
+            userId: actorId,
+            action: 'PARENT_UPDATED',
+            entity: 'Parent',
+            entityId: id,
+            description: 'Updated parent profile',
+          },
+        });
+        return parent;
+      });
+    } catch (error) {
+      if (this.isUniqueError(error)) throw new ConflictException('Phone is already registered');
+      throw error;
+    }
+  }
+
+  async updateParentStatus(id: string, status: 'ACTIVE' | 'INACTIVE', actorId: string) {
+    return this.transitionParentStatus(id, status, actorId, 'PARENT_STATUS_CHANGED');
+  }
+
+  async archiveParent(id: string, actorId: string) {
+    return this.transitionParentStatus(id, UserStatus.ARCHIVED, actorId, 'PARENT_ARCHIVED');
+  }
+
+  async restoreParent(id: string, actorId: string) {
+    const existing = await this.prisma.parent.findUnique({
       where: { id },
-      data: {
-        address: dto.address,
-        user: dto.fullName ? { update: { fullName: dto.fullName } } : undefined,
-      },
-      include: {
-        user: { select: { id: true, fullName: true, phone: true, email: true, status: true } },
-      },
+      select: { user: { select: { status: true } } },
     });
-    await this.log(actorId, 'PARENT_UPDATED', 'Parent', id, 'Updated parent profile');
-    return parent;
+    if (!existing) throw new NotFoundException('Parent not found');
+    if (existing.user.status !== UserStatus.ARCHIVED) {
+      throw new ConflictException('Only an archived parent can be restored');
+    }
+    return this.transitionParentStatus(id, UserStatus.ACTIVE, actorId, 'PARENT_RESTORED');
   }
 
   async updateSpecialist(id: string, dto: UpdateSpecialistDto, actorId: string) {
-    await this.getSpecialist(id);
-    const item = await this.prisma.specialist.update({
-      where: { id },
-      data: dto,
-      include: {
-        user: { select: { id: true, fullName: true, phone: true, email: true, status: true } },
-      },
-    });
-    await this.log(actorId, 'SPECIALIST_UPDATED', 'Specialist', id, 'Updated specialist profile');
-    return item;
+    let phone: string | undefined;
+    try {
+      phone = dto.phone === undefined ? undefined : normalizeUzbekPhone(dto.phone);
+    } catch {
+      throw new BadRequestException({ field: 'phone', message: 'Phone must be a valid Uzbekistan phone number' });
+    }
+    const workingDays = this.canonicalWorkingDays(dto.workingDays);
+
+    try {
+      return await this.prisma.$transaction(async (tx) => {
+        const existing = await tx.specialist.findUnique({ where: { id }, select: { userId: true } });
+        if (!existing) throw new NotFoundException('Specialist not found');
+
+        const item = await tx.specialist.update({
+          where: { id },
+          data: {
+            specialization: dto.specialization,
+            experienceYears: dto.experienceYears,
+            bio: dto.bio,
+            workingDays,
+            user:
+              dto.fullName !== undefined || phone !== undefined
+                ? { update: { fullName: dto.fullName, phone } }
+                : undefined,
+          },
+          include: {
+            user: { select: { id: true, fullName: true, phone: true, status: true } },
+          },
+        });
+        await tx.activityLog.create({
+          data: {
+            userId: actorId,
+            action: 'SPECIALIST_UPDATED',
+            entity: 'Specialist',
+            entityId: id,
+            description: 'Updated specialist profile',
+          },
+        });
+        return item;
+      });
+    } catch (error) {
+      if (this.isUniqueError(error)) throw new ConflictException('Phone is already registered');
+      throw error;
+    }
+  }
+
+  async updateSpecialistStatus(
+    id: string,
+    status: 'ACTIVE' | 'INACTIVE',
+    actorId: string,
+  ) {
+    return this.transitionSpecialistStatus(id, status, actorId, 'SPECIALIST_STATUS_CHANGED');
   }
 
   async archiveSpecialist(id: string, actorId: string) {
-    await this.getSpecialist(id);
-    const item = await this.prisma.specialist.update({
-      where: { id },
-      data: { status: SpecialistStatus.ARCHIVED },
-      include: {
-        user: { select: { id: true, fullName: true, phone: true, email: true, status: true } },
-      },
-    });
-    await this.log(actorId, 'SPECIALIST_ARCHIVED', 'Specialist', id, 'Archived specialist');
-    return item;
+    return this.transitionSpecialistStatus(id, SpecialistStatus.ARCHIVED, actorId, 'SPECIALIST_ARCHIVED');
+  }
+
+  async restoreSpecialist(id: string, actorId: string) {
+    const existing = await this.prisma.specialist.findUnique({ where: { id }, select: { status: true } });
+    if (!existing) throw new NotFoundException('Specialist not found');
+    if (existing.status !== SpecialistStatus.ARCHIVED) {
+      throw new ConflictException('Only an archived specialist can be restored');
+    }
+    return this.transitionSpecialistStatus(id, SpecialistStatus.ACTIVE, actorId, 'SPECIALIST_RESTORED');
   }
 
   async parentForUser(userId: string) {
     const parent = await this.prisma.parent.findUnique({
       where: { userId },
-      include: { user: { select: { id: true, fullName: true, phone: true, email: true, status: true } } },
+      include: { user: { select: { id: true, fullName: true, phone: true, status: true } } },
     });
     if (!parent) throw new NotFoundException('Parent profile not found');
     return parent;
@@ -275,17 +369,111 @@ export class ProfilesService {
   async specialistForUser(userId: string) {
     const specialist = await this.prisma.specialist.findUnique({
       where: { userId },
-      include: { user: { select: { id: true, fullName: true, phone: true, email: true, status: true } } },
+      include: { user: { select: { id: true, fullName: true, phone: true, status: true } } },
     });
     if (!specialist) throw new NotFoundException('Specialist profile not found');
     return specialist;
   }
 
-  private async log(userId: string, action: string, entity: string, entityId: string, description: string): Promise<void> {
-    await this.prisma.activityLog.create({ data: { userId, action, entity, entityId, description } });
-  }
-
   private isUniqueError(error: unknown): boolean {
     return typeof error === 'object' && error !== null && 'code' in error && error.code === 'P2002';
+  }
+
+  private canonicalWorkingDays(workingDays: number[] | undefined): number[] | undefined {
+    return workingDays === undefined ? undefined : [...workingDays].sort((left, right) => left - right);
+  }
+
+  private async transitionSpecialistStatus(
+    id: string,
+    status: SpecialistStatus,
+    actorId: string,
+    action: string,
+  ) {
+    return this.prisma.$transaction(async (tx) => {
+      const existing = await tx.specialist.findUnique({
+        where: { id },
+        select: { status: true, userId: true },
+      });
+      if (!existing) throw new NotFoundException('Specialist not found');
+      if (existing.status === SpecialistStatus.ARCHIVED && action !== 'SPECIALIST_RESTORED') {
+        throw new ConflictException('Archived specialist must be restored before changing status');
+      }
+
+      const userStatus =
+        status === SpecialistStatus.ACTIVE
+          ? UserStatus.ACTIVE
+          : status === SpecialistStatus.INACTIVE
+            ? UserStatus.INACTIVE
+            : UserStatus.ARCHIVED;
+      const revokedAt = new Date();
+      const item = await tx.specialist.update({
+        where: { id },
+        data: {
+          status,
+          user: { update: { status: userStatus, tokenVersion: { increment: 1 } } },
+        },
+        include: {
+          user: { select: { id: true, fullName: true, phone: true, status: true } },
+        },
+      });
+      await tx.userSession.updateMany({
+        where: { userId: existing.userId, revokedAt: null },
+        data: { revokedAt },
+      });
+      await tx.activityLog.create({
+        data: {
+          userId: actorId,
+          action,
+          entity: 'Specialist',
+          entityId: id,
+          description: `Changed specialist status from ${existing.status} to ${status}`,
+          metadata: { from: existing.status, to: status },
+        },
+      });
+      return item;
+    });
+  }
+
+  private async transitionParentStatus(
+    id: string,
+    status: 'ACTIVE' | 'INACTIVE' | 'ARCHIVED',
+    actorId: string,
+    action: string,
+  ) {
+    return this.prisma.$transaction(async (tx) => {
+      const existing = await tx.parent.findUnique({
+        where: { id },
+        select: { userId: true, user: { select: { status: true } } },
+      });
+      if (!existing) throw new NotFoundException('Parent not found');
+      if (existing.user.status === UserStatus.ARCHIVED && action !== 'PARENT_RESTORED') {
+        throw new ConflictException('Archived parent must be restored before changing status');
+      }
+      const item = await tx.parent.update({
+        where: { id },
+        data: {
+          user: { update: { status, tokenVersion: { increment: 1 } } },
+        },
+        include: {
+          user: { select: { id: true, fullName: true, phone: true, status: true } },
+          _count: { select: { children: true, payments: true, transactions: true } },
+        },
+      });
+      await tx.userSession.updateMany({
+        where: { userId: existing.userId, revokedAt: null },
+        data: { revokedAt: new Date() },
+      });
+      await tx.activityLog.create({
+        data: {
+          userId: actorId,
+          action,
+          entity: 'Parent',
+          entityId: id,
+          description: `Changed parent status from ${existing.user.status} to ${status}`,
+          metadata: { from: existing.user.status, to: status },
+        },
+      });
+      return item;
+    });
   }
 }

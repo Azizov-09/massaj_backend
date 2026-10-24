@@ -31,6 +31,5 @@ export const environmentSchema = Joi.object({
   SUPER_ADMIN_PHONE: Joi.string().when('NODE_ENV', { is: 'production', then: Joi.required(), otherwise: Joi.optional() }),
   SUPER_ADMIN_PASSWORD: Joi.string().min(12).when('NODE_ENV', { is: 'production', then: Joi.required(), otherwise: Joi.optional() }),
   SUPER_ADMIN_FULL_NAME: Joi.string().when('NODE_ENV', { is: 'production', then: Joi.required(), otherwise: Joi.optional() }),
-  SUPER_ADMIN_EMAIL: Joi.string().email().optional(),
   SWAGGER_ENABLED: Joi.boolean().truthy('true').falsy('false').default(false),
 }).unknown(true);

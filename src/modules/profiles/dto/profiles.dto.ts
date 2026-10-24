@@ -1,5 +1,21 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsInt, IsOptional, IsString, Length, Matches, Max, Min } from 'class-validator';
+import { SpecialistStatus } from '@prisma/client';
+import { Transform, Type } from 'class-transformer';
+import {
+  ArrayUnique,
+  IsArray,
+  IsIn,
+  IsInt,
+  IsOptional,
+  IsString,
+  Length,
+  Matches,
+  Max,
+  Min,
+} from 'class-validator';
+
+const emptyStringToNull = ({ value }: { value: unknown }): unknown =>
+  typeof value === 'string' ? value.trim() || null : value;
 
 export class CreateUserProfileDto {
   @ApiProperty({ description: 'User full name' })
@@ -25,11 +41,12 @@ export class CreateUserProfileDto {
 }
 
 export class CreateParentDto extends CreateUserProfileDto {
-  @ApiPropertyOptional({ description: 'Residential address' })
+  @ApiPropertyOptional({ description: 'Residential address', nullable: true })
+  @Transform(emptyStringToNull)
   @IsOptional()
   @IsString()
   @Length(1, 500)
-  address?: string;
+  address?: string | null;
 }
 
 export class UpdateParentDto {
@@ -39,11 +56,24 @@ export class UpdateParentDto {
   @Length(2, 160)
   fullName?: string;
 
-  @ApiPropertyOptional({ description: 'Residential address' })
+  @ApiPropertyOptional({ description: 'Updated international phone number' })
+  @IsOptional()
+  @IsString()
+  @Length(7, 32)
+  phone?: string;
+
+  @ApiPropertyOptional({ description: 'Residential address; empty string clears it', nullable: true })
+  @Transform(emptyStringToNull)
   @IsOptional()
   @IsString()
   @Length(1, 500)
-  address?: string;
+  address?: string | null;
+}
+
+export class UpdateParentStatusDto {
+  @ApiProperty({ enum: ['ACTIVE', 'INACTIVE'] })
+  @IsIn(['ACTIVE', 'INACTIVE'])
+  status!: 'ACTIVE' | 'INACTIVE';
 }
 
 export class CreateSpecialistDto extends CreateUserProfileDto {
@@ -58,14 +88,41 @@ export class CreateSpecialistDto extends CreateUserProfileDto {
   @Max(80)
   experienceYears!: number;
 
-  @ApiPropertyOptional({ description: 'Professional biography and credentials' })
+  @ApiPropertyOptional({ description: 'Professional biography and credentials', nullable: true })
+  @Transform(emptyStringToNull)
   @IsOptional()
   @IsString()
   @Length(1, 5000)
-  bio?: string;
+  bio?: string | null;
+
+  @ApiPropertyOptional({
+    description: 'Canonical ISO weekdays (Monday=1 ... Sunday=7). An empty array means no working days.',
+    type: [Number],
+    default: [1, 2, 3, 4, 5, 6, 7],
+  })
+  @IsOptional()
+  @IsArray()
+  @ArrayUnique()
+  @Type(() => Number)
+  @IsInt({ each: true })
+  @Min(1, { each: true })
+  @Max(7, { each: true })
+  workingDays?: number[];
 }
 
 export class UpdateSpecialistDto {
+  @ApiPropertyOptional({ description: 'Updated full name' })
+  @IsOptional()
+  @IsString()
+  @Length(2, 160)
+  fullName?: string;
+
+  @ApiPropertyOptional({ description: 'Updated international phone number' })
+  @IsOptional()
+  @IsString()
+  @Length(7, 32)
+  phone?: string;
+
   @ApiPropertyOptional({ description: 'Clinical specialization' })
   @IsOptional()
   @IsString()
@@ -79,9 +136,29 @@ export class UpdateSpecialistDto {
   @Max(80)
   experienceYears?: number;
 
-  @ApiPropertyOptional({ description: 'Professional biography' })
+  @ApiPropertyOptional({ description: 'Professional biography; empty string clears it', nullable: true })
+  @Transform(emptyStringToNull)
   @IsOptional()
   @IsString()
   @Length(1, 5000)
-  bio?: string;
+  bio?: string | null;
+
+  @ApiPropertyOptional({
+    description: 'Canonical ISO weekdays (Monday=1 ... Sunday=7). An empty array means no working days.',
+    type: [Number],
+  })
+  @IsOptional()
+  @IsArray()
+  @ArrayUnique()
+  @Type(() => Number)
+  @IsInt({ each: true })
+  @Min(1, { each: true })
+  @Max(7, { each: true })
+  workingDays?: number[];
+}
+
+export class UpdateSpecialistStatusDto {
+  @ApiProperty({ enum: [SpecialistStatus.ACTIVE, SpecialistStatus.INACTIVE] })
+  @IsIn([SpecialistStatus.ACTIVE, SpecialistStatus.INACTIVE])
+  status!: 'ACTIVE' | 'INACTIVE';
 }

@@ -2,12 +2,14 @@ import * as argon2 from 'argon2';
 import {
   AppointmentStatus,
   AttendanceStatus,
+  EmployeeStatus,
   Gender,
   NotificationType,
   PaymentMethod,
   Prisma,
   PrismaClient,
   Role,
+  SpecialistStatus,
   TransactionDirection,
   TransactionType,
 } from '@prisma/client';
@@ -33,6 +35,11 @@ export const SEED_IDS = {
     '30000000-0000-4000-8000-000000000001',
     '30000000-0000-4000-8000-000000000002',
   ],
+  employees: [
+    '31000000-0000-4000-8000-000000000001',
+    '31000000-0000-4000-8000-000000000002',
+    '31000000-0000-4000-8000-000000000003',
+  ],
   parents: [
     '40000000-0000-4000-8000-000000000001',
     '40000000-0000-4000-8000-000000000002',
@@ -54,6 +61,7 @@ export const SEED_IDS = {
 export interface SeedSummary {
   datasetVersion: string;
   users: number;
+  employees: number;
   appointments: number;
   attendances: number;
   payments: number;
@@ -143,11 +151,54 @@ export async function seedDatabase(prisma: PrismaClient): Promise<SeedSummary> {
     });
 
     const specialistRows = [
-      { id: SEED_IDS.specialists[0], userId: SEED_IDS.users.specialist1, specialization: 'Bolalar massaji', experienceYears: 8 },
-      { id: SEED_IDS.specialists[1], userId: SEED_IDS.users.specialist2, specialization: 'Davolovchi jismoniy tarbiya', experienceYears: 6 },
+      {
+        id: SEED_IDS.specialists[0],
+        userId: SEED_IDS.users.specialist1,
+        specialization: 'Bolalar massaji',
+        experienceYears: 8,
+        bio: 'Bolalar massaji va reabilitatsiya bo‘yicha mutaxassis.',
+        workingDays: [1, 2, 3, 4, 5, 6, 7],
+        status: SpecialistStatus.ACTIVE,
+      },
+      {
+        id: SEED_IDS.specialists[1],
+        userId: SEED_IDS.users.specialist2,
+        specialization: 'Davolovchi jismoniy tarbiya',
+        experienceYears: 6,
+        bio: null,
+        workingDays: [1, 2, 3, 4, 5, 6, 7],
+        status: SpecialistStatus.ACTIVE,
+      },
     ];
     for (const row of specialistRows) {
       await tx.specialist.upsert({ where: { id: row.id }, create: row, update: row });
+    }
+
+    const employeeRows = [
+      {
+        id: SEED_IDS.employees[0],
+        fullName: 'Development Receptionist',
+        position: 'Receptionist',
+        phone: '+998904000001',
+        status: EmployeeStatus.ACTIVE,
+      },
+      {
+        id: SEED_IDS.employees[1],
+        fullName: 'Development Accountant',
+        position: 'Accountant',
+        phone: '+998904000002',
+        status: EmployeeStatus.INACTIVE,
+      },
+      {
+        id: SEED_IDS.employees[2],
+        fullName: 'Archived Development Employee',
+        position: 'Archive fixture',
+        phone: '+998904000003',
+        status: EmployeeStatus.ARCHIVED,
+      },
+    ];
+    for (const row of employeeRows) {
+      await tx.employee.upsert({ where: { id: row.id }, create: row, update: row });
     }
 
     const parentRows = [
@@ -451,8 +502,9 @@ export async function seedDatabase(prisma: PrismaClient): Promise<SeedSummary> {
 }
 
 export async function verifySeedDatabase(prisma: PrismaClient): Promise<SeedSummary> {
-  const [users, appointments, attendances, payments, transactions, notifications, linkedPayments] = await Promise.all([
+  const [users, employees, appointments, attendances, payments, transactions, notifications, linkedPayments] = await Promise.all([
     prisma.user.count({ where: { id: { in: Object.values(SEED_IDS.users) } } }),
+    prisma.employee.count({ where: { id: { in: [...SEED_IDS.employees] } } }),
     prisma.appointment.count({ where: { courseKey: { startsWith: 'seed-course-' } } }),
     prisma.attendance.count({ where: { appointment: { courseKey: { startsWith: 'seed-course-' } } } }),
     prisma.payment.count({ where: { idempotencyKey: { startsWith: 'seed:payment:' } } }),
@@ -474,6 +526,7 @@ export async function verifySeedDatabase(prisma: PrismaClient): Promise<SeedSumm
   ]);
   if (
     users !== 7 ||
+    employees !== 3 ||
     appointments !== 30 ||
     attendances !== 18 ||
     payments !== 3 ||
@@ -482,7 +535,7 @@ export async function verifySeedDatabase(prisma: PrismaClient): Promise<SeedSumm
     notifications !== 15
   ) {
     throw new Error(
-      `Seed integrity failure: users=${users}, appointments=${appointments}, attendances=${attendances}, payments=${payments}, linkedPayments=${linkedPayments}, transactions=${transactions}, notifications=${notifications}`,
+      `Seed integrity failure: users=${users}, employees=${employees}, appointments=${appointments}, attendances=${attendances}, payments=${payments}, linkedPayments=${linkedPayments}, transactions=${transactions}, notifications=${notifications}`,
     );
   }
   const seededPayments = await prisma.payment.findMany({
@@ -525,5 +578,24 @@ export async function verifySeedDatabase(prisma: PrismaClient): Promise<SeedSumm
       throw new Error(`Seed ledger mismatch for parent ${expected.parentId}`);
     }
   }
-  return { datasetVersion: SEED_DATASET_VERSION, users, appointments, attendances, payments, transactions, notifications, expectedStates };
+  const employeeStates = await prisma.employee.findMany({
+    where: { id: { in: [...SEED_IDS.employees] } },
+    select: { id: true, status: true },
+    orderBy: { id: 'asc' },
+  });
+  const expectedEmployeeStates = [EmployeeStatus.ACTIVE, EmployeeStatus.INACTIVE, EmployeeStatus.ARCHIVED];
+  if (employeeStates.some((employee, index) => employee.status !== expectedEmployeeStates[index])) {
+    throw new Error('Seed employee lifecycle fixtures do not cover ACTIVE, INACTIVE, and ARCHIVED');
+  }
+  return {
+    datasetVersion: SEED_DATASET_VERSION,
+    users,
+    employees,
+    appointments,
+    attendances,
+    payments,
+    transactions,
+    notifications,
+    expectedStates,
+  };
 }

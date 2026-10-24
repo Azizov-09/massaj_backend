@@ -173,3 +173,100 @@ Frontend requests must use `credentials: "include"`. Production uses `Secure; Sa
 | 500/503 | Unexpected or dependency failure | Keep the idempotency key and retry with bounded exponential backoff |
 
 Breaking changes in this release are mandatory payment/refund/charge idempotency keys, cookie-only refresh responses, and session-bound access JWTs. Frontend and backend must be released together; users with pre-release access tokens will need to log in again.
+
+## 12. Phone-only identity (breaking change)
+
+`email` has been removed from Prisma, every create/update DTO, API selections, bootstrap configuration, and seed data. Frontend forms must not send an `email` property. Because global whitelist validation remains strict, an old payload containing `email` returns `400` with `property email should not exist`.
+
+All account phones are stored in canonical Uzbekistan form: `+998XXXXXXXXX`. Inputs such as `90 123 45 67` are normalized before uniqueness checks. A duplicate phone returns `409`:
+
+```json
+{
+  "statusCode": 409,
+  "message": "Phone is already registered"
+}
+```
+
+Login remains:
+
+```http
+POST /auth/login
+```
+
+```json
+{ "phone": "+998901234567", "password": "StrongPassword123" }
+```
+
+There is intentionally no email recovery route. Password recovery is blocked until an OTP-backed SMS provider and one-time challenge store are approved. Frontend must not show an email recovery flow or claim that an SMS was sent. Administrators may provision a new password through the controlled account-management process; that operation must revoke all existing sessions.
+
+## 13. Parent contract
+
+- `POST /parents` — create User + Parent atomically.
+- `GET /parents` and `GET /parents/:id` — list/detail; archived parents are excluded from the default list.
+- `PATCH /parents/:id` — update `fullName`, `phone`, and/or `address`.
+- `PATCH /parents/:id/status` — body `{ "status": "ACTIVE" | "INACTIVE" }`.
+- `POST /parents/:id/archive` — soft delete; children, ChildParent links, payments, debt, transactions, appointments, documents, and consents remain intact.
+- `DELETE /parents/:id` — compatibility alias for the same soft archive operation; it never hard-deletes.
+- `POST /parents/:id/restore` — restore an archived parent to `ACTIVE`.
+
+Create example:
+
+```json
+{
+  "fullName": "Malika Aliyeva",
+  "phone": "90 123 45 67",
+  "password": "StrongPassword123",
+  "address": "Toshkent, Chilonzor"
+}
+```
+
+Every Parent status transition increments `tokenVersion`, revokes unrevoked refresh sessions, writes an ActivityLog, and returns the updated nested `user.status`. `INACTIVE` and `ARCHIVED` accounts cannot log in or use an old access/refresh token.
+
+## 14. Specialist contract
+
+- `POST /specialists` — create User + Specialist atomically.
+- `PATCH /specialists/:id` — update profile fields plus `fullName`, `phone`, `bio`, and `workingDays`; `status` is deliberately rejected here.
+- `PATCH /specialists/:id/status` — body `{ "status": "ACTIVE" | "INACTIVE" }`.
+- `POST /specialists/:id/archive` — archive and revoke sessions.
+- `POST /specialists/:id/restore` — restore to `ACTIVE`.
+
+`bio` is optional. `"bio": ""` is normalized to `null`. `workingDays` is a unique integer array using ISO weekday values (`1=Monday` through `7=Sunday`); all seven values are supported and `[]` means the specialist has no bookable workday.
+
+```json
+{
+  "fullName": "Dilnoza Karimova",
+  "phone": "+998901112233",
+  "password": "StrongPassword123",
+  "specialization": "Bolalar massaji",
+  "experienceYears": 8,
+  "bio": "",
+  "workingDays": [1, 2, 3, 4, 5, 6, 7]
+}
+```
+
+Appointment create/reschedule rejects an inactive/archived specialist, an inactive/archived parent, or a date outside `workingDays`. Weekday calculation uses `CenterSettings.timezone` (default `Asia/Tashkent`).
+
+## 15. Admin and Employee lifecycle
+
+Admin endpoints are `SUPER_ADMIN` only:
+
+- `POST /admins`, `GET /admins`, `GET /admins/:id`, `PATCH /admins/:id`
+- `POST /admins/:id/activate`
+- `POST /admins/:id/deactivate`
+- `POST /admins/:id/archive`
+- `POST /admins/:id/restore`
+
+The current Super Admin cannot deactivate/archive itself, and the last active Super Admin cannot be demoted, deactivated, or archived. Security changes revoke sessions and invalidate access JWTs through `tokenVersion`.
+
+Employee records are phone-only and expose the same explicit activate/deactivate/archive/restore operations under `/employees/:id/*`. Employee phone is unique and normalized; duplicate values return `409`.
+
+## 16. Unified lifecycle semantics
+
+| State/operation | Meaning | Login | Default lists | History |
+|---|---|---:|---:|---:|
+| `ACTIVE` | Account may use permitted features | Allowed | Included | Preserved |
+| `INACTIVE` | Temporarily disabled | Denied | Included | Preserved |
+| `ARCHIVED` | Soft-deleted from ordinary workflows | Denied | Excluded | Preserved |
+| restore | Explicit `ARCHIVED -> ACTIVE` transition | Allowed after new login | Included | Preserved |
+
+Archive is never a hard delete. Any future hard-delete endpoint must be separate, Super Admin-only, dependency-checked, and audited.
