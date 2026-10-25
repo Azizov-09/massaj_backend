@@ -36,7 +36,6 @@ export class AnnouncementsService {
       }
       const result = await tx.announcement.update({ where: { id }, data: { status: AnnouncementStatus.PUBLISHED, publishedAt: new Date() } });
       await tx.activityLog.create({ data: { userId: actorId, action: 'ANNOUNCEMENT_PUBLISHED', entity: 'Announcement', entityId: id, description: `Published announcement to ${recipients.length} parents` } });
-      await tx.outboxEvent.create({ data: { eventType: 'ANNOUNCEMENT_PUBLISHED', aggregateType: 'Announcement', aggregateId: id, payload: { announcementId: id, recipientCount: recipients.length } } });
       return result;
     }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
   }

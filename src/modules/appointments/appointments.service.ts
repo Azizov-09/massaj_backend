@@ -1,4 +1,11 @@
-import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  ForbiddenException,
+  Injectable,
+  InternalServerErrorException,
+  NotFoundException,
+} from '@nestjs/common';
 import { AppointmentStatus, Prisma, Role, ServiceStatus, SpecialistStatus, UserStatus } from '@prisma/client';
 import { RequestUser } from '../../common/types/request-user.type';
 import { PrismaService } from '../../database/prisma.service';
@@ -12,6 +19,8 @@ const relations = {
   service: { select: { id: true, name: true, durationMinutes: true, price: true } },
   attendance: true,
 } satisfies Prisma.AppointmentInclude;
+
+type AppointmentWithRelations = Prisma.AppointmentGetPayload<{ include: typeof relations }>;
 
 const editableAppointmentStatuses: AppointmentStatus[] = [
   AppointmentStatus.SCHEDULED,
@@ -59,7 +68,7 @@ export class AppointmentsService {
       return { appointment, notification };
     }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
     if (result.notification) this.notifications.emitRealtimeNotification(prepared.parentUserId, result.notification);
-    return result.appointment;
+    return this.presentAppointment(result.appointment);
   }
 
   async list(query: AppointmentQueryDto, user: RequestUser) {
@@ -80,13 +89,16 @@ export class AppointmentsService {
       }),
       this.prisma.appointment.count({ where }),
     ]);
-    return { items, meta: { page: query.page, limit: query.limit, total, totalPages: Math.ceil(total / query.limit) } };
+    return {
+      items: items.map((item) => this.presentAppointment(item)),
+      meta: { page: query.page, limit: query.limit, total, totalPages: Math.ceil(total / query.limit) },
+    };
   }
 
   async get(id: string, user: RequestUser) {
     const row = await this.prisma.appointment.findFirst({ where: { id, ...(await this.accessWhere(user)) }, include: relations });
     if (!row) throw new NotFoundException('Appointment not found');
-    return row;
+    return this.presentAppointment(row);
   }
 
   async update(id: string, dto: UpdateAppointmentDto, user: RequestUser) {
@@ -102,7 +114,7 @@ export class AppointmentsService {
       serviceId: dto.serviceId ?? existing.serviceId,
       startAt: dto.startAt ?? existing.startAt.toISOString(),
     });
-    return this.prisma.$transaction(async (tx) => {
+    const result = await this.prisma.$transaction(async (tx) => {
       await this.assertAvailable(
         tx,
         existing.childId,
@@ -127,6 +139,7 @@ export class AppointmentsService {
       });
       return updated;
     }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+    return this.presentAppointment(result);
   }
 
   async updateStatus(id: string, status: AppointmentStatus, user: RequestUser) {
@@ -147,7 +160,12 @@ export class AppointmentsService {
     if (!(allowed[appointment.status] ?? []).includes(status)) {
       throw new ConflictException(`Cannot change appointment from ${appointment.status} to ${status}`);
     }
-    return this.prisma.appointment.update({ where: { id }, data: { status }, include: relations });
+    const updated = await this.prisma.appointment.update({
+      where: { id },
+      data: { status },
+      include: relations,
+    });
+    return this.presentAppointment(updated);
   }
 
   private async validateInput(dto: Pick<CreateAppointmentDto, 'childId' | 'parentId' | 'specialistId' | 'serviceId' | 'startAt'>) {
@@ -249,5 +267,16 @@ export class AppointmentsService {
     } catch {
       throw new BadRequestException(`Invalid center timezone configuration: ${timeZone}`);
     }
+  }
+
+  private presentAppointment(row: AppointmentWithRelations) {
+    if (!row.child || !row.specialist?.user || !row.service) {
+      throw new InternalServerErrorException('Appointment relation integrity violation');
+    }
+    return {
+      ...row,
+      child: { ...row.child, fullName: `${row.child.firstName} ${row.child.lastName}`.trim() },
+      specialist: { ...row.specialist, fullName: row.specialist.user.fullName },
+    };
   }
 }

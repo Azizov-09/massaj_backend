@@ -216,3 +216,15 @@ export class ClinicalListQueryDto {
   @Max(100)
   limit = 50;
 }
+
+export class AttendanceListQueryDto extends ClinicalListQueryDto {
+  @ApiPropertyOptional({ description: 'Filter by appointment UUID' })
+  @IsOptional()
+  @IsUUID()
+  appointmentId?: string;
+
+  @ApiPropertyOptional({ enum: AttendanceStatus, description: 'Filter by attendance outcome' })
+  @IsOptional()
+  @IsEnum(AttendanceStatus)
+  status?: AttendanceStatus;
+}

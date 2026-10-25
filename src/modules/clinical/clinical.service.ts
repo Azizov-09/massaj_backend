@@ -11,6 +11,7 @@ import { RequestUser } from '../../common/types/request-user.type';
 import { PrismaService } from '../../database/prisma.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import {
+  AttendanceListQueryDto,
   ClinicalListQueryDto,
   CreateAssessmentDto,
   CreateAttendanceDto,
@@ -39,6 +40,22 @@ const progressRelations = {
   specialist: { select: { id: true, user: { select: { fullName: true } } } },
   createdBy: { select: { id: true, fullName: true, role: true } },
 } satisfies Prisma.ProgressEntryInclude;
+
+const attendanceRelations = {
+  child: { select: { id: true, firstName: true, lastName: true } },
+  specialist: { select: { id: true, user: { select: { fullName: true } } } },
+  appointment: {
+    select: {
+      id: true,
+      startAt: true,
+      endAt: true,
+      status: true,
+      service: { select: { id: true, name: true, durationMinutes: true } },
+    },
+  },
+} satisfies Prisma.AttendanceInclude;
+
+type AttendanceWithRelations = Prisma.AttendanceGetPayload<{ include: typeof attendanceRelations }>;
 
 @Injectable()
 export class ClinicalService {
@@ -87,7 +104,7 @@ export class ClinicalService {
       : appointment
         ? this.requireNotFuture(appointment.startAt.toISOString(), 'Attendance date')
         : new Date();
-    return this.prisma.$transaction(async (tx) => {
+    const result = await this.prisma.$transaction(async (tx) => {
       const attendance = await tx.attendance.create({
         data: {
           appointmentId: dto.appointmentId,
@@ -105,8 +122,12 @@ export class ClinicalService {
           data: { status: completed ? AppointmentStatus.COMPLETED : AppointmentStatus.NO_SHOW },
         });
       }
-      return attendance;
+      return tx.attendance.findUniqueOrThrow({
+        where: { id: attendance.id },
+        include: attendanceRelations,
+      });
     });
+    return this.presentAttendance(result);
   }
 
   async updateAttendance(id: string, dto: UpdateAttendanceDto, user: RequestUser) {
@@ -116,7 +137,7 @@ export class ClinicalService {
     else if (user.role === Role.SPECIALIST) {
       throw new ForbiddenException('Only administrators or assigned specialists can update attendance');
     }
-    return this.prisma.$transaction(async (tx) => {
+    const result = await this.prisma.$transaction(async (tx) => {
       const updated = await tx.attendance.update({ where: { id }, data: dto });
       if (row.appointmentId) {
         const completed = dto.status === AttendanceStatus.PRESENT || dto.status === AttendanceStatus.LATE;
@@ -125,17 +146,47 @@ export class ClinicalService {
           data: { status: completed ? AppointmentStatus.COMPLETED : AppointmentStatus.NO_SHOW },
         });
       }
-      return updated;
+      return tx.attendance.findUniqueOrThrow({
+        where: { id: updated.id },
+        include: attendanceRelations,
+      });
     });
+    return this.presentAttendance(result);
   }
 
   async attendances(childId: string, user: RequestUser) {
     await this.access.assertChildAccess(user, childId);
-    return this.prisma.attendance.findMany({
+    const rows = await this.prisma.attendance.findMany({
       where: { childId },
-      include: { specialist: { include: { user: { select: { fullName: true } } } } },
+      include: attendanceRelations,
       orderBy: { date: 'desc' },
     });
+    return rows.map((row) => this.presentAttendance(row));
+  }
+
+  async listAttendance(query: AttendanceListQueryDto, user: RequestUser) {
+    const access = await this.attendanceAccessWhere(user, query.specialistId);
+    const where: Prisma.AttendanceWhereInput = {
+      ...access,
+      childId: query.childId,
+      appointmentId: query.appointmentId,
+      status: query.status,
+      date: this.dateRange(query.from, query.to),
+    };
+    const [rows, total] = await this.prisma.$transaction([
+      this.prisma.attendance.findMany({
+        where,
+        include: attendanceRelations,
+        orderBy: { date: 'desc' },
+        skip: (query.page - 1) * query.limit,
+        take: query.limit,
+      }),
+      this.prisma.attendance.count({ where }),
+    ]);
+    return {
+      items: rows.map((row) => this.presentAttendance(row)),
+      meta: { page: query.page, limit: query.limit, total, totalPages: Math.ceil(total / query.limit) },
+    };
   }
 
   async assessments(childId: string, user: RequestUser) {
@@ -283,6 +334,29 @@ export class ClinicalService {
     throw new ForbiddenException('Access denied');
   }
 
+  private async attendanceAccessWhere(
+    user: RequestUser,
+    requestedSpecialistId?: string,
+  ): Promise<Prisma.AttendanceWhereInput> {
+    if (user.role === Role.SUPER_ADMIN || user.role === Role.ADMIN) {
+      return { specialistId: requestedSpecialistId };
+    }
+    if (user.role === Role.SPECIALIST) {
+      const specialistId = await this.access.currentSpecialistId(user.id);
+      if (requestedSpecialistId && requestedSpecialistId !== specialistId) {
+        throw new ForbiddenException('Specialists may only view their own attendance records');
+      }
+      return { specialistId };
+    }
+    if (user.role === Role.PARENT) {
+      return {
+        specialistId: requestedSpecialistId,
+        child: { parents: { some: { parent: { userId: user.id } } } },
+      };
+    }
+    throw new ForbiddenException('Access denied');
+  }
+
   private dateRange(from?: string, to?: string): { gte?: Date; lte?: Date } | undefined {
     if (!from && !to) return undefined;
     const range: { gte?: Date; lte?: Date } = {};
@@ -325,6 +399,19 @@ export class ClinicalService {
       child: { ...row.child, fullName: `${row.child.firstName} ${row.child.lastName}`.trim() },
       specialist: { ...row.specialist, fullName: row.specialist.user.fullName },
       recordedBy: row.createdBy,
+    };
+  }
+
+  private presentAttendance(row: AttendanceWithRelations) {
+    if (!row.child) {
+      throw new InternalServerErrorException('Attendance child relation integrity violation');
+    }
+    return {
+      ...row,
+      child: { ...row.child, fullName: `${row.child.firstName} ${row.child.lastName}`.trim() },
+      specialist: row.specialist
+        ? { ...row.specialist, fullName: row.specialist.user.fullName }
+        : null,
     };
   }
 

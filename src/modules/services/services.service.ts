@@ -2,14 +2,82 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import { ServiceStatus } from '@prisma/client';
 import { PrismaService } from '../../database/prisma.service';
 import { CreateServiceDto, UpdateServiceDto } from './dto/service.dto';
+
 @Injectable()
 export class ServicesService {
   constructor(private readonly prisma: PrismaService) {}
-  list(status?: ServiceStatus) { return this.prisma.service.findMany({ where: status ? { status } : undefined, orderBy: { name: 'asc' } }); }
-  async get(id: string) { const item = await this.prisma.service.findUnique({ where: { id } }); if (!item) throw new NotFoundException('Service not found'); return item; }
-  async create(dto: CreateServiceDto, actorId: string) { const item = await this.prisma.service.create({ data: dto }); await this.log(actorId, 'SERVICE_CREATED', item.id, 'Created service catalog item'); return item; }
-  async update(id: string, dto: UpdateServiceDto, actorId: string) { await this.get(id); const item = await this.prisma.service.update({ where: { id }, data: dto }); await this.log(actorId, 'SERVICE_UPDATED', id, 'Updated service catalog item; historical session prices are unchanged'); return item; }
-  async archive(id: string, actorId: string) { await this.get(id); const item = await this.prisma.service.update({ where: { id }, data: { status: ServiceStatus.ARCHIVED } }); await this.log(actorId, 'SERVICE_ARCHIVED', id, 'Archived service'); return item; }
-  async restore(id: string, actorId: string) { await this.get(id); const item = await this.prisma.service.update({ where: { id }, data: { status: ServiceStatus.ACTIVE } }); await this.log(actorId, 'SERVICE_RESTORED', id, 'Restored service'); return item; }
-  private log(userId: string, action: string, entityId: string, description: string) { return this.prisma.activityLog.create({ data: { userId, action, entity: 'Service', entityId, description } }); }
+
+  list(status?: ServiceStatus) {
+    return this.prisma.service.findMany({
+      where: status ? { status } : undefined,
+      orderBy: { name: 'asc' },
+    });
+  }
+
+  async get(id: string) {
+    const item = await this.prisma.service.findUnique({ where: { id } });
+    if (!item) throw new NotFoundException('Service not found');
+    return item;
+  }
+
+  create(dto: CreateServiceDto, actorId: string) {
+    return this.prisma.$transaction(async (tx) => {
+      const item = await tx.service.create({ data: dto });
+      await tx.activityLog.create({
+        data: {
+          userId: actorId,
+          action: 'SERVICE_CREATED',
+          entity: 'Service',
+          entityId: item.id,
+          description: 'Created service catalog item',
+        },
+      });
+      return item;
+    });
+  }
+
+  update(id: string, dto: UpdateServiceDto, actorId: string) {
+    return this.prisma.$transaction(async (tx) => {
+      const existing = await tx.service.findUnique({ where: { id }, select: { id: true } });
+      if (!existing) throw new NotFoundException('Service not found');
+      const item = await tx.service.update({ where: { id }, data: dto });
+      await tx.activityLog.create({
+        data: {
+          userId: actorId,
+          action: 'SERVICE_UPDATED',
+          entity: 'Service',
+          entityId: id,
+          description: 'Updated service catalog item; historical appointment and ledger rows are unchanged',
+        },
+      });
+      return item;
+    });
+  }
+
+  archive(id: string, actorId: string) {
+    return this.changeStatus(id, ServiceStatus.ARCHIVED, actorId, 'SERVICE_ARCHIVED');
+  }
+
+  restore(id: string, actorId: string) {
+    return this.changeStatus(id, ServiceStatus.ACTIVE, actorId, 'SERVICE_RESTORED');
+  }
+
+  private changeStatus(id: string, status: ServiceStatus, actorId: string, action: string) {
+    return this.prisma.$transaction(async (tx) => {
+      const existing = await tx.service.findUnique({ where: { id }, select: { id: true, status: true } });
+      if (!existing) throw new NotFoundException('Service not found');
+      const item = await tx.service.update({ where: { id }, data: { status } });
+      await tx.activityLog.create({
+        data: {
+          userId: actorId,
+          action,
+          entity: 'Service',
+          entityId: id,
+          description: `Changed service status from ${existing.status} to ${status}; historical relations remain intact`,
+          metadata: { from: existing.status, to: status },
+        },
+      });
+      return item;
+    });
+  }
 }

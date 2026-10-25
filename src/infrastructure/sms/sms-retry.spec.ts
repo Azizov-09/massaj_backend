@@ -141,4 +141,25 @@ describe('SMS Delivery & Outbox Retry Policy', () => {
       }),
     });
   });
+
+  it('rejects unsupported event types instead of silently marking them processed', async () => {
+    mockPrisma.outboxEvent.findUnique.mockResolvedValue({
+      id: 'event-unsupported',
+      eventType: 'ANNOUNCEMENT_PUBLISHED',
+      status: OutboxStatus.PENDING,
+      payload: {},
+    });
+
+    const job: any = { data: { eventId: 'event-unsupported' }, attemptsMade: 2 };
+    await expect(processor.process(job)).rejects.toThrow(
+      'Unsupported outbox event type: ANNOUNCEMENT_PUBLISHED',
+    );
+    expect(mockPrisma.outboxEvent.update).toHaveBeenCalledWith({
+      where: { id: 'event-unsupported' },
+      data: expect.objectContaining({
+        status: OutboxStatus.FAILED,
+        lastError: 'Unsupported outbox event type: ANNOUNCEMENT_PUBLISHED',
+      }),
+    });
+  });
 });

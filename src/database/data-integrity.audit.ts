@@ -13,6 +13,56 @@ type DiagnosticCheck = {
 
 const checks: DiagnosticCheck[] = [
   {
+    name: 'orphanAppointments',
+    description: 'Appointments missing a child, parent, specialist, service, or valid parent-child relation.',
+    query: Prisma.sql`
+      SELECT a."id"::text AS identifier, COUNT(*) OVER()::int AS total
+      FROM "Appointment" a
+      LEFT JOIN "Child" c ON c."id" = a."childId"
+      LEFT JOIN "Parent" p ON p."id" = a."parentId"
+      LEFT JOIN "Specialist" s ON s."id" = a."specialistId"
+      LEFT JOIN "Service" sv ON sv."id" = a."serviceId"
+      LEFT JOIN "ChildParent" cp ON cp."childId" = a."childId" AND cp."parentId" = a."parentId"
+      WHERE c."id" IS NULL OR p."id" IS NULL OR s."id" IS NULL OR sv."id" IS NULL OR cp."id" IS NULL
+      ORDER BY a."id" LIMIT 100`,
+  },
+  {
+    name: 'orphanAttendances',
+    description: 'Attendance rows missing required child or optional referenced appointment/specialist records.',
+    query: Prisma.sql`
+      SELECT a."id"::text AS identifier, COUNT(*) OVER()::int AS total
+      FROM "Attendance" a
+      LEFT JOIN "Child" c ON c."id" = a."childId"
+      LEFT JOIN "Specialist" s ON s."id" = a."specialistId"
+      LEFT JOIN "Appointment" ap ON ap."id" = a."appointmentId"
+      WHERE c."id" IS NULL
+        OR (a."specialistId" IS NOT NULL AND s."id" IS NULL)
+        OR (a."appointmentId" IS NOT NULL AND ap."id" IS NULL)
+      ORDER BY a."id" LIMIT 100`,
+  },
+  {
+    name: 'appointmentAttendanceRelationMismatches',
+    description: 'Appointment-linked attendance whose child or specialist differs from the appointment.',
+    query: Prisma.sql`
+      SELECT a."id"::text AS identifier, COUNT(*) OVER()::int AS total
+      FROM "Attendance" a
+      JOIN "Appointment" ap ON ap."id" = a."appointmentId"
+      WHERE a."childId" IS DISTINCT FROM ap."childId"
+        OR a."specialistId" IS DISTINCT FROM ap."specialistId"
+      ORDER BY a."id" LIMIT 100`,
+  },
+  {
+    name: 'appointmentAttendanceStatusMismatches',
+    description: 'Appointment status does not match the recorded attendance outcome.',
+    query: Prisma.sql`
+      SELECT a."id"::text AS identifier, COUNT(*) OVER()::int AS total
+      FROM "Attendance" a
+      JOIN "Appointment" ap ON ap."id" = a."appointmentId"
+      WHERE (a."status" IN ('PRESENT', 'LATE') AND ap."status" <> 'COMPLETED')
+        OR (a."status" IN ('ABSENT', 'NO_SHOW') AND ap."status" <> 'NO_SHOW')
+      ORDER BY a."id" LIMIT 100`,
+  },
+  {
     name: 'invalidUserPhoneIdentities',
     description: 'User accounts whose required identity phone is missing or not canonical +998XXXXXXXXX.',
     query: Prisma.sql`
@@ -190,7 +240,7 @@ async function main(): Promise<void> {
     const clinicalColumns = await prisma.$queryRaw<Array<{ tableName: string; columnName: string }>>(Prisma.sql`
       SELECT table_name AS "tableName", column_name AS "columnName"
       FROM information_schema.columns
-      WHERE table_schema = 'public'
+      WHERE table_schema = current_schema()
         AND ((table_name = 'Assessment' AND column_name = 'assessedAt')
           OR (table_name = 'ProgressEntry' AND column_name = 'occurredAt'))`);
     const goalState = await prisma.$queryRaw<Array<{ exists: boolean }>>(Prisma.sql`

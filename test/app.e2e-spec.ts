@@ -589,13 +589,57 @@ describe('Rehabilitation Center CRM (Comprehensive E2E Tests)', () => {
         })
         .expect(201);
       appointmentId = res.body.id;
+      expect(res.body.child).toMatchObject({
+        id: childId,
+        firstName: 'E2E-Child',
+        lastName: 'Temirov',
+        fullName: 'E2E-Child Temirov',
+      });
+      expect(res.body.specialist).toMatchObject({
+        id: specialistProfileId,
+        fullName: 'Specialist E2E',
+        user: { fullName: 'Specialist E2E' },
+      });
+      expect(res.body.service).toMatchObject({
+        id: serviceId,
+        name: 'E2E Pediatric Massage',
+        durationMinutes: 45,
+      });
+      expect(res.body.startAt).toBeDefined();
+      expect(res.body.endAt).toBeDefined();
+      expect(res.body.status).toBe('SCHEDULED');
 
       const schedule = await request(app.getHttpServer())
         .get('/api/v1/appointments')
         .query({ childId })
         .set('Authorization', `Bearer ${adminToken}`)
         .expect(200);
-      expect(schedule.body.items.some((row: { id: string }) => row.id === appointmentId)).toBe(true);
+      const scheduleRow = schedule.body.items.find((row: { id: string }) => row.id === appointmentId);
+      expect(scheduleRow).toMatchObject({
+        id: appointmentId,
+        child: { id: childId, fullName: 'E2E-Child Temirov' },
+        specialist: {
+          id: specialistProfileId,
+          fullName: 'Specialist E2E',
+          user: { fullName: 'Specialist E2E' },
+        },
+        service: { id: serviceId, name: 'E2E Pediatric Massage', durationMinutes: 45 },
+        status: 'SCHEDULED',
+      });
+
+      const detail = await request(app.getHttpServer())
+        .get(`/api/v1/appointments/${appointmentId}`)
+        .set('Authorization', `Bearer ${adminToken}`)
+        .expect(200);
+      expect(detail.body).toMatchObject({
+        id: scheduleRow.id,
+        child: scheduleRow.child,
+        specialist: scheduleRow.specialist,
+        service: scheduleRow.service,
+        startAt: scheduleRow.startAt,
+        endAt: scheduleRow.endAt,
+        status: scheduleRow.status,
+      });
     });
 
     it('records attendance against the appointment', async () => {
@@ -613,9 +657,56 @@ describe('Rehabilitation Center CRM (Comprehensive E2E Tests)', () => {
 
       expect(res.body.id).toBeDefined();
       expect(res.body.status).toBe('PRESENT');
+      expect(res.body.child).toMatchObject({ id: childId, fullName: 'E2E-Child Temirov' });
+      expect(res.body.specialist).toMatchObject({
+        id: specialistProfileId,
+        fullName: 'Specialist E2E',
+        user: { fullName: 'Specialist E2E' },
+      });
+      expect(res.body.appointment).toMatchObject({
+        id: appointmentId,
+        status: 'COMPLETED',
+        service: { id: serviceId, name: 'E2E Pediatric Massage', durationMinutes: 45 },
+      });
       attendanceId = res.body.id;
       const appointment = await prisma.appointment.findUniqueOrThrow({ where: { id: appointmentId } });
       expect(appointment.status).toBe('COMPLETED');
+    });
+
+    it('lists hydrated attendance rows through the paginated global endpoint', async () => {
+      const res = await request(app.getHttpServer())
+        .get('/api/v1/attendance')
+        .query({ childId, appointmentId, page: 1, limit: 10 })
+        .set('Authorization', `Bearer ${adminToken}`)
+        .expect(200);
+
+      expect(res.body.meta).toMatchObject({ page: 1, limit: 10, total: 1, totalPages: 1 });
+      expect(res.body.items).toHaveLength(1);
+      expect(res.body.items[0]).toMatchObject({
+        id: attendanceId,
+        child: { id: childId, fullName: 'E2E-Child Temirov' },
+        specialist: {
+          id: specialistProfileId,
+          fullName: 'Specialist E2E',
+          user: { fullName: 'Specialist E2E' },
+        },
+        appointment: {
+          id: appointmentId,
+          status: 'COMPLETED',
+          service: { id: serviceId, name: 'E2E Pediatric Massage', durationMinutes: 45 },
+        },
+      });
+    });
+
+    it('scopes the global attendance list to a parent linked child', async () => {
+      const res = await request(app.getHttpServer())
+        .get('/api/v1/attendance')
+        .query({ page: 1, limit: 10 })
+        .set('Authorization', `Bearer ${parentToken}`)
+        .expect(200);
+
+      expect(res.body.items.some((row: { id: string }) => row.id === attendanceId)).toBe(true);
+      expect(res.body.items.every((row: { child: { id: string } }) => row.child.id === childId)).toBe(true);
     });
 
     it('allows the assigned specialist to access the child after attendance assignment', async () => {
@@ -680,6 +771,77 @@ describe('Rehabilitation Center CRM (Comprehensive E2E Tests)', () => {
         .expect(200);
 
       expect(debtRes.body.debt).toBe(150_000);
+    });
+  });
+
+  describe('Service Lifecycle & Historical Integrity', () => {
+    it('updates a service without breaking appointment or ledger history', async () => {
+      const res = await request(app.getHttpServer())
+        .patch(`/api/v1/services/${serviceId}`)
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({
+          name: 'E2E Pediatric Massage Updated',
+          description: 'Updated treatment description',
+          durationMinutes: 50,
+          price: 175_000,
+        })
+        .expect(200);
+
+      expect(res.body).toMatchObject({
+        id: serviceId,
+        name: 'E2E Pediatric Massage Updated',
+        durationMinutes: 50,
+        price: 175_000,
+        status: 'ACTIVE',
+      });
+      const historicalAppointment = await prisma.appointment.findUniqueOrThrow({ where: { id: appointmentId } });
+      expect(historicalAppointment.serviceId).toBe(serviceId);
+      const historicalCharge = await prisma.transaction.findFirstOrThrow({ where: { appointmentId } });
+      expect(historicalCharge.amount).toBe(150_000);
+    });
+
+    it('archives a service, preserves history, and blocks new appointments', async () => {
+      const archived = await request(app.getHttpServer())
+        .post(`/api/v1/services/${serviceId}/archive`)
+        .set('Authorization', `Bearer ${adminToken}`)
+        .expect(200);
+      expect(archived.body).toMatchObject({ id: serviceId, status: 'ARCHIVED' });
+
+      const historicalAppointment = await prisma.appointment.findUniqueOrThrow({ where: { id: appointmentId } });
+      expect(historicalAppointment.serviceId).toBe(serviceId);
+      await request(app.getHttpServer())
+        .post('/api/v1/appointments')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({
+          childId,
+          parentId: parentProfileId,
+          specialistId: specialistProfileId,
+          serviceId,
+          startAt: '2031-01-06T09:00:00.000Z',
+          courseKey: `archived-service-${childId}`,
+          sequenceNumber: 2,
+        })
+        .expect(400);
+    });
+
+    it('restores a service to the active catalog', async () => {
+      const restored = await request(app.getHttpServer())
+        .post(`/api/v1/services/${serviceId}/restore`)
+        .set('Authorization', `Bearer ${adminToken}`)
+        .expect(200);
+      expect(restored.body).toMatchObject({ id: serviceId, status: 'ACTIVE' });
+
+      const detail = await request(app.getHttpServer())
+        .get(`/api/v1/services/${serviceId}`)
+        .set('Authorization', `Bearer ${adminToken}`)
+        .expect(200);
+      expect(detail.body).toMatchObject({
+        id: serviceId,
+        name: 'E2E Pediatric Massage Updated',
+        durationMinutes: 50,
+        price: 175_000,
+        status: 'ACTIVE',
+      });
     });
   });
 

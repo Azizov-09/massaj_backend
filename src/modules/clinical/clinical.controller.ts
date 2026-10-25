@@ -5,6 +5,7 @@ import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { RequestUser } from '../../common/types/request-user.type';
 import {
+  AttendanceListQueryDto,
   ClinicalListQueryDto,
   CreateAssessmentDto,
   CreateAttendanceDto,
@@ -27,6 +28,13 @@ export class ClinicalController {
   @ApiResponse({ status: 201, description: 'Attendance record created.' })
   attendance(@Body() dto: CreateAttendanceDto, @CurrentUser() user: RequestUser) {
     return this.clinical.attendance(dto, user);
+  }
+
+  @Get('attendance')
+  @ApiOperation({ summary: 'List Accessible Attendance With Child, Specialist, Appointment And Service' })
+  @ApiResponse({ status: 200, description: 'Paginated attendance records with identity relations.' })
+  listAttendance(@Query() query: AttendanceListQueryDto, @CurrentUser() user: RequestUser) {
+    return this.clinical.listAttendance(query, user);
   }
 
   @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.SPECIALIST)

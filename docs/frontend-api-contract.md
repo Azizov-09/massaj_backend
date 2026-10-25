@@ -270,3 +270,105 @@ Employee records are phone-only and expose the same explicit activate/deactivate
 | restore | Explicit `ARCHIVED -> ACTIVE` transition | Allowed after new login | Included | Preserved |
 
 Archive is never a hard delete. Any future hard-delete endpoint must be separate, Super Admin-only, dependency-checked, and audited.
+
+## 17. Appointment schedule and detail contract
+
+`GET /appointments` returns `{ items, meta }`. `GET /appointments/:id` returns one item with the same relation shape. The frontend must read the nested fields below; it must not replace a present relation with `Noma'lum` because it expected a different key.
+
+```json
+{
+  "id": "appointment-uuid",
+  "childId": "child-uuid",
+  "specialistId": "specialist-uuid",
+  "serviceId": "service-uuid",
+  "startAt": "2026-10-24T05:00:00.000Z",
+  "endAt": "2026-10-24T05:45:00.000Z",
+  "status": "COMPLETED",
+  "notes": "Optional appointment note",
+  "child": {
+    "id": "child-uuid",
+    "firstName": "Ali",
+    "lastName": "Valiyev",
+    "fullName": "Ali Valiyev"
+  },
+  "specialist": {
+    "id": "specialist-uuid",
+    "fullName": "Dilnoza Karimova",
+    "user": { "fullName": "Dilnoza Karimova" }
+  },
+  "service": {
+    "id": "service-uuid",
+    "name": "Bolalar massaji",
+    "durationMinutes": 45,
+    "price": 150000
+  },
+  "attendance": null
+}
+```
+
+Canonical display mappings are `child.fullName` (or `firstName + lastName`), `specialist.fullName` (the compatibility path `specialist.user.fullName` remains present), and `service.name`. `startAt` and `endAt` are ISO timestamps; render them in the center timezone. A relation-integrity failure is a server error and is never silently rewritten to `Noma'lum`.
+
+## 18. Paginated attendance contract
+
+Use `GET /attendance` for the global Attendance screen. Supported query fields are `childId`, `specialistId`, `appointmentId`, `status`, `from`, `to`, `page`, and `limit` (maximum 100). Admins see all accessible rows, specialists only their rows, and parents only rows for linked children.
+
+```json
+{
+  "items": [
+    {
+      "id": "attendance-uuid",
+      "status": "PRESENT",
+      "date": "2026-10-24T05:45:00.000Z",
+      "note": "Session completed",
+      "child": {
+        "id": "child-uuid",
+        "firstName": "Ali",
+        "lastName": "Valiyev",
+        "fullName": "Ali Valiyev"
+      },
+      "specialist": {
+        "id": "specialist-uuid",
+        "fullName": "Dilnoza Karimova",
+        "user": { "fullName": "Dilnoza Karimova" }
+      },
+      "appointment": {
+        "id": "appointment-uuid",
+        "startAt": "2026-10-24T05:00:00.000Z",
+        "endAt": "2026-10-24T05:45:00.000Z",
+        "status": "COMPLETED",
+        "service": {
+          "id": "service-uuid",
+          "name": "Bolalar massaji",
+          "durationMinutes": 45
+        }
+      }
+    }
+  ],
+  "meta": { "page": 1, "limit": 50, "total": 1, "totalPages": 1 }
+}
+```
+
+`GET /children/:childId/attendance` remains available for one child's unpaginated profile history. `PRESENT` and `LATE` attendance set the linked appointment to `COMPLETED`; `ABSENT` and `NO_SHOW` set it to `NO_SHOW`.
+
+## 19. Service management contract
+
+| Operation | Method and path | Body | Success |
+|---|---|---|---:|
+| Update | `PATCH /services/:id` | Any of `name`, `description`, `durationMinutes`, `price` | 200 |
+| Archive | `POST /services/:id/archive` | none | 200 |
+| Restore | `POST /services/:id/restore` | none | 200 |
+
+Archive changes the service status to `ARCHIVED`. Existing appointment and ledger references remain intact, but new appointments with that service return `400`. Restore changes it back to `ACTIVE`. These mutations require `ADMIN` or `SUPER_ADMIN`.
+
+## 20. Canonical account lifecycle endpoints
+
+Do not infer `/activate` or `/deactivate` routes for Parent and Specialist; those routes do not exist. Use the following exact contract:
+
+| Account | Activate/deactivate | Archive | Restore |
+|---|---|---|---|
+| Parent | `PATCH /parents/:id/status` with `{ "status": "ACTIVE" | "INACTIVE" }` | `POST /parents/:id/archive` | `POST /parents/:id/restore` |
+| Specialist | `PATCH /specialists/:id/status` with `{ "status": "ACTIVE" | "INACTIVE" }` | `POST /specialists/:id/archive` | `POST /specialists/:id/restore` |
+| Admin | `POST /admins/:id/activate` or `/deactivate` | `POST /admins/:id/archive` | `POST /admins/:id/restore` |
+| Employee | `POST /employees/:id/activate` or `/deactivate` | `POST /employees/:id/archive` | `POST /employees/:id/restore` |
+
+All account status/archive transitions are server-authorized and audited. Security-sensitive transitions increment `tokenVersion` and revoke active refresh sessions, so clients must treat the next `401` as a forced re-login.

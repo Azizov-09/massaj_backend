@@ -93,6 +93,11 @@ async function main(): Promise<void> {
       ['--config', './test/jest-e2e.json', '--runInBand'],
       env,
     );
+    runNode(
+      join(process.cwd(), 'node_modules', 'ts-node', 'dist', 'bin.js'),
+      ['src/database/data-integrity.audit.ts'],
+      env,
+    );
   } finally {
     if (redisOwned) await redis.flushdb();
     if (redis.status !== 'end') redis.disconnect();
